@@ -161,7 +161,7 @@ VITE_API_BASE_URL=http://localhost:8080
 
 - Java 21
 - Maven 3.9+
-- Node.js 18+
+- Node.js 18+ (Vite 5 requires Node 18+)
 - Docker + Docker Compose
 
 ### 1) Start Postgres and build/run backend
@@ -195,6 +195,63 @@ Open: `http://localhost:5173`
 | POST   | `/users`         | Create a user      |
 | PUT    | `/users/{id}`    | Update a user      |
 | DELETE | `/users/{id}`    | Delete a user      |
+
+---
+
+## Vue Frontend Walkthrough
+
+This UI is a single Vue component (`frontend/src/App.vue`) that manages the CRUD lifecycle:
+
+- **State:** The component stores the user list, the form fields, and any error messages.
+- **Lifecycle:** When the component mounts, it calls `fetchUsers()` to load data from the API.
+- **Form behavior:**
+  - If no `editingId` is set, the form submits a `POST /users` to create a new record.
+  - If `editingId` is set, the form submits a `PUT /users/{id}` to update the selected record.
+- **Table actions:**
+  - **Edit** fills the form with the selected user and sets `editingId`.
+  - **Delete** calls `DELETE /users/{id}` and refreshes the list afterward.
+- **API wiring:** Axios uses `VITE_API_BASE_URL` so the UI can point to different backends without changing code.
+
+If you are new to Vue, the key idea is that **template markup binds to reactive state**. When the state changes (like `users` updating after a fetch), Vue automatically re-renders the DOM.
+
+---
+
+## cURL Examples (macOS-friendly)
+
+Replace `localhost:8080` if your backend runs elsewhere.
+
+```bash
+# List users
+curl -s http://localhost:8080/users
+
+# Create a user
+curl -s -X POST http://localhost:8080/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ada Lovelace","email":"ada@example.com"}'
+
+# Update a user (replace 1 with an existing id)
+curl -s -X PUT http://localhost:8080/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ada Byron","email":"ada.byron@example.com"}'
+
+# Delete a user (replace 1 with an existing id)
+curl -s -X DELETE http://localhost:8080/users/1
+```
+
+---
+
+## Troubleshooting
+
+**`npm install` fails with `SyntaxError: Unexpected token {` from `esbuild`**
+
+This usually means your Node.js version is too old to parse modern JavaScript syntax used by `esbuild` and Vite 5. Install Node.js 18+ and try again:
+
+```bash
+node -v
+# If below 18, update with nvm (recommended):
+# nvm install 18
+# nvm use 18
+```
 
 ---
 
