@@ -18,5 +18,11 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.4",
     "vite": "^5.2.10"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.57.1"
+  },
+  "overrides": {
+    "rollup": "4.57.1"
   }
 }

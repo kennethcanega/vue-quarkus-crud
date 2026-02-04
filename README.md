@@ -253,6 +253,17 @@ node -v
 # nvm use 18
 ```
 
+**`npm run dev` fails with `Cannot find module '@rollup/rollup-darwin-arm64'`**
+
+This is an npm optional dependency issue on macOS ARM (see npm CLI issue #4828). The fastest fix is to clear the install and reinstall:
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+If you previously ran `npm audit fix --force`, it may have bumped Vite and Rollup to a newer major version. Prefer `npm audit fix` without `--force` to avoid unexpected breaking changes.
+
 ---
 
 ## What Was Configured (and Why)
