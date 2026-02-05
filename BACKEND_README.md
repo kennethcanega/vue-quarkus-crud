@@ -112,6 +112,13 @@ UI path:
 
 Then open **Credentials** tab and copy client secret.
 
+
+
+**If you are stuck on the screen you shared:**
+- In your screenshot, the top-left dropdown shows `quarkus-crud-client` as the **realm**. That means you are currently viewing **Realm settings**, not the client details page.
+- To reach the correct page: left menu → **Clients** → click client **`quarkus-crud-client`**.
+- On that client page, open **Settings** (or during create flow, **Capability config**) and ensure **Service accounts roles = ON**. Save.
+- After saving, a **Service account roles** tab becomes available for that client. Open it to assign `realm-management` roles.
 ### Step 5: Grant service-account roles
 
 **Purpose:** Required for backend provisioning in Manage Users.
