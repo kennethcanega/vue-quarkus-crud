@@ -9,6 +9,7 @@ public record UserResponse(
         boolean active
 ) {
     public static UserResponse from(User user) {
-        return new UserResponse(user.id, user.name, user.email, user.username, user.role, user.active);
+        boolean isActive = Boolean.TRUE.equals(user.active);
+        return new UserResponse(user.id, user.name, user.email, user.username, user.role, isActive);
     }
 }

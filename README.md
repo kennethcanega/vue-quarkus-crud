@@ -79,7 +79,7 @@ Quarkus uses annotations to enforce access:
 This means **even curl/Postman users are blocked** unless they have a valid JWT with the right role.
 
 ### 4) Default admin seeding
-On startup, a default admin is created **only if the table is empty**:
+On startup, a default admin is created **if it does not already exist**:
 
 ```
 username: admin
@@ -88,6 +88,12 @@ role: admin
 ```
 
 You can then create additional users in the admin UI.
+
+If you already have users from the original CRUD app, startup will backfill:
+- `username` derived from email (or a fallback)
+- `role` set to `user`
+- `active` set to `true`
+- `password` set to **changeme** (bcrypt hash stored)
 
 ### 5) Key configuration (backend)
 `backend/src/main/resources/application.properties` includes:

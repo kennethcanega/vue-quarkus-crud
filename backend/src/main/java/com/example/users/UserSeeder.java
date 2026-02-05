@@ -10,16 +10,51 @@ public class UserSeeder {
 
     @Transactional
     void seed(@Observes StartupEvent event) {
-        if (User.count() > 0) {
+        User admin = User.findByUsername("admin");
+        if (admin == null) {
+            admin = new User();
+            admin.name = "Administrator";
+            admin.email = "admin@example.com";
+            admin.username = "admin";
+            admin.passwordHash = PasswordUtils.hash("admin");
+            admin.role = "admin";
+            admin.active = true;
+            admin.persist();
+        }
+
+        User.findAll().list().forEach(this::backfillUser);
+    }
+
+    private void backfillUser(User user) {
+        boolean updated = false;
+        if (user.username == null || user.username.isBlank()) {
+            user.username = deriveUsername(user);
+            updated = true;
+        }
+        if (user.passwordHash == null || user.passwordHash.isBlank()) {
+            user.passwordHash = PasswordUtils.hash("changeme");
+            updated = true;
+        }
+        if (user.role == null || user.role.isBlank()) {
+            user.role = "user";
+            updated = true;
+        }
+        if (user.active == null) {
+            user.active = true;
+            updated = true;
+        }
+        if (!updated) {
             return;
         }
-        User admin = new User();
-        admin.name = "Administrator";
-        admin.email = "admin@example.com";
-        admin.username = "admin";
-        admin.passwordHash = PasswordUtils.hash("admin");
-        admin.role = "admin";
-        admin.active = true;
-        admin.persist();
+    }
+
+    private String deriveUsername(User user) {
+        if (user.email != null && user.email.contains("@")) {
+            return user.email.substring(0, user.email.indexOf('@'));
+        }
+        if (user.name != null && !user.name.isBlank()) {
+            return user.name.toLowerCase().replaceAll("\\s+", ".") + user.id;
+        }
+        return "user" + user.id;
     }
 }
