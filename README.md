@@ -108,12 +108,17 @@ Navigation:
 1. Left menu → **Clients** → **Create client**.
 2. Client type: **OpenID Connect**.
 3. Client ID: `quarkus-crud-client`.
-4. Continue and set:
+4. Continue and set (this matches your screenshot):
    - **Client authentication**: ON
    - **Authorization**: OFF
-   - **Direct access grants**: ON
-   - (Standard flow may stay ON/OFF; not required for current backend broker flow)
-5. Save, then open **Credentials** tab and copy the client secret.
+   - **Authentication flow / Direct access grants**: ON
+   - **Authentication flow / Service accounts roles**: ON
+   - **Standard flow**: can stay ON (not used by current backend flow, but harmless)
+5. Click **Next**.
+6. In **Login settings** (Root URL, Home URL, Valid redirect URIs, Valid post logout redirect URIs, Web origins):
+   - for this backend-to-Keycloak client, you can leave all of them empty
+   - these are mainly needed for browser redirect/OIDC code flow clients
+7. Click **Save**, then open **Credentials** tab and copy the client secret.
 
 ### 6) Enable Service Account and grant admin API roles
 
@@ -121,7 +126,7 @@ Navigation:
 
 Navigation:
 1. Open client `quarkus-crud-client`.
-2. Ensure **Service accounts roles** is enabled.
+2. Verify **Service accounts roles** is ON (if OFF, turn it ON and save).
 3. Go to **Service account roles** tab.
 4. In client roles selector choose `realm-management`.
 5. Assign at minimum:

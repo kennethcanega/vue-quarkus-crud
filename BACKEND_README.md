@@ -101,10 +101,14 @@ UI path:
 - **Clients** → **Create client**
 - Type: OpenID Connect
 - ID: `quarkus-crud-client`
-- Settings:
+- Settings (same values shown in your Keycloak create-client screenshots):
   - Client authentication: enabled
   - Direct access grants: enabled
+  - Service accounts roles: enabled
   - Authorization: disabled
+  - Standard flow: optional for this backend flow
+
+- Next screen (**Login settings**): Root URL, Home URL, Valid redirect URIs, post-logout URIs, and Web origins can stay empty for this backend service client.
 
 Then open **Credentials** tab and copy client secret.
 
@@ -113,7 +117,7 @@ Then open **Credentials** tab and copy client secret.
 **Purpose:** Required for backend provisioning in Manage Users.
 
 UI path:
-- Client `quarkus-crud-client` → **Service account roles** tab
+- Client `quarkus-crud-client` → verify **Service accounts roles** is ON, then open **Service account roles** tab
 - Select client `realm-management`
 - Assign:
   - `manage-users`
