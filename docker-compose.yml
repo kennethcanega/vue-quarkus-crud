@@ -44,7 +44,7 @@ services:
       KEYCLOAK_SERVER_URL: http://keycloak:8080
       KEYCLOAK_REALM: quarkus-crud
       KEYCLOAK_CLIENT_ID: quarkus-crud-client
-      KEYCLOAK_CLIENT_SECRET: change-me
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-change-me}
       CORS_ORIGINS: http://localhost:5173
       AUTH_REFRESH_COOKIE_SECURE: "false"
     ports:

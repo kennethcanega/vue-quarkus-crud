@@ -174,6 +174,42 @@ export AUTH_REFRESH_COOKIE_SECURE="false"
 5. Use stronger password and MFA policies in Keycloak realm.
 6. Set `AUTH_REFRESH_COOKIE_SECURE=true` and use strict CORS origins.
 7. Configure backup/restore for both Postgres and Keycloak DB.
+
+
+### 10) Troubleshooting: `invalid_client_credentials` on login
+
+If backend logs or Keycloak events show:
+
+```
+error="invalid_client_credentials", grant_type="password"
+```
+
+it means the backend's client secret does **not** match the secret configured in Keycloak for `quarkus-crud-client`.
+
+Why this happens:
+- backend `/auth/login` sends `client_id` + `client_secret` to Keycloak token endpoint.
+- if the client secret is wrong, Keycloak rejects before checking username/password.
+
+Fix:
+1. In Keycloak: **Clients** → `quarkus-crud-client` → **Credentials** → copy secret.
+2. Set the same value in backend runtime env:
+
+```bash
+export KEYCLOAK_CLIENT_SECRET="<copied-secret>"
+```
+
+3. Restart backend container/app so new env is applied.
+4. Retry login.
+
+For Docker Compose, backend reads:
+
+```yaml
+KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-change-me}
+```
+
+So you can also place the secret in a local `.env` file (never commit real secrets).
+
+
 ---
 
 ## How To Run (Step-by-Step)

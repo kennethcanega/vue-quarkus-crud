@@ -168,6 +168,35 @@ export AUTH_REFRESH_COOKIE_SECURE="false"
 - Local `users` table stores only app profile + authorization metadata (`name`, `email`, `username`, `role`, `active`, optional `keycloakUserId`).
 - The backend no longer stores password hashes.
 
+
+
+## 3.2) Troubleshooting `invalid_client_credentials`
+
+Symptom in Keycloak logs:
+
+```
+error="invalid_client_credentials", grant_type="password"
+```
+
+Meaning:
+- Keycloak rejected the **client secret** for `quarkus-crud-client`.
+- User password is not evaluated yet at this stage.
+
+Why:
+- `AuthResource` sends `client_id` + `client_secret` in password-grant token exchange.
+- If backend env secret and Keycloak client secret differ, login always fails.
+
+Fix path:
+1. Keycloak UI → **Clients** → `quarkus-crud-client` → **Credentials** → copy secret.
+2. Set backend env `KEYCLOAK_CLIENT_SECRET` to that exact value.
+3. Restart backend container/process.
+4. Retry login.
+
+Compose note:
+- `docker-compose.yml` uses `KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-change-me}`.
+- Set `KEYCLOAK_CLIENT_SECRET` in shell or `.env` before `docker compose up --build`.
+
+
 ---
 
 ## 4) Auth flow in code (`AuthResource`)
