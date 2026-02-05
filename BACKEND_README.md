@@ -259,6 +259,9 @@ Required service account roles (realm-management):
 - `view-realm`
 
 
+When `POST /users` returns 502, check backend logs for `Keycloak operation failed [...]` entries. These now include HTTP status and response body from Keycloak admin/token endpoints to speed up diagnosis.
+
+
 ---
 
 ## 4) Auth flow in code (`AuthResource`)

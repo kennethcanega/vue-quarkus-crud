@@ -259,6 +259,9 @@ Recommended Keycloak service account roles:
 - `view-realm`
 
 
+When `POST /users` returns 502, check backend logs for `Keycloak operation failed [...]` entries. These now include HTTP status and response body from Keycloak admin/token endpoints to speed up diagnosis.
+
+
 ---
 
 ## How To Run (Step-by-Step)

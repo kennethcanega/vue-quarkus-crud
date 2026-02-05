@@ -64,6 +64,7 @@ public class KeycloakAdminService {
 
         HttpResponse<String> response = sendJson("POST", adminUsersEndpoint(), adminToken, payload);
         if (response == null) {
+            logFailure("createUser", response);
             return null;
         }
 
@@ -76,9 +77,11 @@ public class KeycloakAdminService {
         } else if (response.statusCode() == 409) {
             userId = findUserIdByUsername(command.username(), adminToken);
         } else {
+            logFailure("createUser", response);
             return null;
         }
         if (userId == null) {
+            LOGGER.warning("Keycloak createUser could not resolve userId for username=" + command.username());
             return null;
         }
 
@@ -102,10 +105,12 @@ public class KeycloakAdminService {
 
         HttpResponse<String> response = sendJson("PUT", adminUsersEndpoint() + "/" + keycloakUserId, adminToken, payload);
         if (response == null || response.statusCode() >= 300) {
+            logFailure("updateUser", response);
             return false;
         }
 
         if (!isBlank(command.password()) && !setPassword(keycloakUserId, command.password(), adminToken)) {
+            LOGGER.warning("Keycloak reset-password failed for userId=" + keycloakUserId);
             return false;
         }
 
@@ -121,7 +126,11 @@ public class KeycloakAdminService {
             return false;
         }
         HttpResponse<String> response = sendJson("DELETE", adminUsersEndpoint() + "/" + keycloakUserId, adminToken, null);
-        return response != null && response.statusCode() < 300;
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("deleteUser", response);
+            return false;
+        }
+        return true;
     }
 
     private boolean setPassword(String userId, String password, String adminToken) {
@@ -130,7 +139,11 @@ public class KeycloakAdminService {
                 "value", password,
                 "temporary", false);
         HttpResponse<String> response = sendJson("PUT", adminUsersEndpoint() + "/" + userId + "/reset-password", adminToken, payload);
-        return response != null && response.statusCode() < 300;
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("resetPassword", response);
+            return false;
+        }
+        return true;
     }
 
     private boolean assignRealmRole(String userId, String roleName, String adminToken) {
@@ -140,6 +153,7 @@ public class KeycloakAdminService {
         JsonNode userRole = getRole("user", adminToken);
         JsonNode existing = getUserRealmRoles(userId, adminToken);
         if (adminRole == null || userRole == null || existing == null) {
+            LOGGER.warning("Keycloak role mapping prerequisites missing for userId=" + userId + ", role=" + finalRole);
             return false;
         }
 
@@ -156,6 +170,7 @@ public class KeycloakAdminService {
                     adminToken,
                     toRemove);
             if (removeResponse == null || removeResponse.statusCode() >= 300) {
+                logFailure("removeRealmRoles", removeResponse);
                 return false;
             }
         }
@@ -166,12 +181,17 @@ public class KeycloakAdminService {
                 adminUsersEndpoint() + "/" + userId + "/role-mappings/realm",
                 adminToken,
                 List.of(targetRole));
-        return addResponse != null && addResponse.statusCode() < 300;
+        if (addResponse == null || addResponse.statusCode() >= 300) {
+            logFailure("addRealmRole", addResponse);
+            return false;
+        }
+        return true;
     }
 
     private JsonNode getRole(String roleName, String adminToken) {
         HttpResponse<String> response = sendJson("GET", adminRolesEndpoint() + "/" + roleName, adminToken, null);
         if (response == null || response.statusCode() >= 300) {
+            logFailure("getRole:" + roleName, response);
             return null;
         }
         try {
@@ -184,6 +204,7 @@ public class KeycloakAdminService {
     private JsonNode getUserRealmRoles(String userId, String adminToken) {
         HttpResponse<String> response = sendJson("GET", adminUsersEndpoint() + "/" + userId + "/role-mappings/realm", adminToken, null);
         if (response == null || response.statusCode() >= 300) {
+            logFailure("getUserRealmRoles", response);
             return null;
         }
         try {
@@ -196,6 +217,7 @@ public class KeycloakAdminService {
     private String findUserIdByUsername(String username, String adminToken) {
         HttpResponse<String> response = sendJson("GET", adminUsersEndpoint() + "?username=" + encode(username) + "&exact=true", adminToken, null);
         if (response == null || response.statusCode() >= 300) {
+            logFailure("findUserIdByUsername", response);
             return null;
         }
         try {
@@ -224,6 +246,7 @@ public class KeycloakAdminService {
 
         HttpResponse<String> response = postToTokenEndpoint(form);
         if (response == null || response.statusCode() != 200) {
+            logFailure("getServiceAccountToken", response);
             return null;
         }
 
@@ -290,6 +313,21 @@ public class KeycloakAdminService {
 
     private String encode(String value) {
         return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
+    }
+
+    private String summarizeResponse(HttpResponse<String> response) {
+        if (response == null) {
+            return "response=null";
+        }
+        String body = Optional.ofNullable(response.body()).orElse("").trim();
+        if (body.length() > 400) {
+            body = body.substring(0, 400) + "...";
+        }
+        return "status=" + response.statusCode() + ", body=" + body;
+    }
+
+    private void logFailure(String operation, HttpResponse<String> response) {
+        LOGGER.warning("Keycloak operation failed [" + operation + "]: " + summarizeResponse(response));
     }
 
     private boolean isBlank(String value) {
