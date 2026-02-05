@@ -1,225 +1,299 @@
-# Backend Guide (Quarkus + RESTEasy Reactive + Panache + JWT)
+# Backend Guide (Quarkus + PostgreSQL + JWT) for Developers New to Quarkus
 
-This guide explains how the backend works for developers familiar with frameworks like Spring Boot but new to Quarkus.
+This guide is written for engineers who are already comfortable with backend development (for example in Spring Boot, .NET, Express, etc.) but are new to Quarkus.
+
+The goal is to explain this backend **file by file**, including runtime/deployment configuration (`docker-compose.yml`, `application.properties`), cryptographic key setup with OpenSSL, and exact authentication/authorization flow.
 
 ---
 
-## 1) Backend libraries first: what each one is used for
+## 1) Libraries used (`backend/pom.xml`) and why
 
-Dependencies are defined in `backend/pom.xml`.
+Quarkus uses extensions (dependencies) to add capabilities. In this project:
 
 - **`quarkus-resteasy-reactive-jackson`**
-  - Builds JSON REST APIs with JAX-RS annotations (`@Path`, `@GET`, `@POST`, ...).
-  - Jackson handles JSON serialization/deserialization.
+  - Exposes REST endpoints using JAX-RS annotations (`@Path`, `@GET`, `@POST`, etc.).
+  - Converts Java objects/records to JSON and back (Jackson).
+
 - **`quarkus-hibernate-orm-panache`**
-  - ORM support + Panache active-record style (`User.findById`, `User.listAll`, `user.persist`).
-  - Comparable outcome to Spring Data JPA, but different API style.
+  - ORM layer for database entities.
+  - Panache adds active-record style helpers (`User.findById`, `User.listAll`, `user.persist`).
+
 - **`quarkus-jdbc-postgresql`**
-  - PostgreSQL JDBC driver integration.
+  - PostgreSQL JDBC integration so Hibernate can connect to Postgres.
+
 - **`quarkus-arc`**
-  - CDI dependency injection container (`@ApplicationScoped`, constructor injection).
+  - CDI dependency injection container.
+  - Enables `@ApplicationScoped` and constructor injection patterns.
+
 - **`quarkus-smallrye-jwt`**
-  - JWT verification and security integration.
+  - Verifies incoming JWT tokens and integrates with Quarkus security identity.
+
 - **`quarkus-smallrye-jwt-build`**
-  - Programmatic JWT token creation (`Jwt.issuer(...).sign()`).
+  - Builds/signs JWT tokens in application code (`Jwt.issuer(...).sign()`).
+
 - **`quarkus-elytron-security-common`**
-  - Password hashing/verification utilities (bcrypt used via `BcryptUtil`).
+  - Password hash utilities (bcrypt through `BcryptUtil`).
 
-### Spring Boot analogy
+### If you come from Spring Boot
 
-- REST controllers (`@RestController`) ≈ JAX-RS resources (`@Path`).
-- Spring Security role checks (`@PreAuthorize`) ≈ `@RolesAllowed`.
-- JPA repository usage ≈ Panache entity methods.
-- `@Component/@Service` DI ≈ CDI scopes like `@ApplicationScoped`.
-
----
-
-## 2) High-level architecture
-
-Request path:
-
-1. Frontend sends HTTP request with optional Bearer token.
-2. Quarkus security verifies JWT signature + issuer + role groups.
-3. JAX-RS resource method handles request.
-4. Panache ORM talks to PostgreSQL.
-5. JSON response is returned.
+- `@RestController` ≈ `@Path` JAX-RS resource class.
+- Spring Security role checks ≈ `@RolesAllowed`.
+- Spring Data repository calls ≈ Panache entity static methods.
+- `@Service`/`@Component` DI ≈ CDI beans like `@ApplicationScoped`.
 
 ---
 
-## 3) Project files and responsibilities
+## 2) Runtime/deployment file: `docker-compose.yml`
 
-### `backend/src/main/resources/application.properties`
+This file spins up local infrastructure and backend service.
 
-Main responsibilities:
+## `postgres` service
 
-- PostgreSQL datasource configuration.
-- Hibernate schema strategy (`update`).
-- CORS settings for frontend integration.
-- JWT issuer and signing/verification key locations.
+- Uses image `postgres:16`.
+- Creates DB/user/password via env vars:
+  - `POSTGRES_DB=userdb`
+  - `POSTGRES_USER=postgres`
+  - `POSTGRES_PASSWORD=postgres`
+- Maps host port `5433` → container `5432`.
+  - So local apps connect to `localhost:5433`.
+- Uses volume `postgres_data` to persist data across container restarts.
 
-### `backend/src/main/java/com/example/users/User.java`
+## `backend` service
 
-Entity model (`users` table):
+- Builds from `./backend` using `src/main/docker/Dockerfile.jvm`.
+- Exposes backend API on host `8080`.
+- Passes datasource env vars:
+  - `QUARKUS_DATASOURCE_JDBC_URL=jdbc:postgresql://postgres:5432/userdb`
+  - `QUARKUS_DATASOURCE_USERNAME=postgres`
+  - `QUARKUS_DATASOURCE_PASSWORD=postgres`
+- `depends_on: postgres` ensures DB container starts first.
 
-- profile fields: `name`, `email`
-- auth fields: `username`, `passwordHash`, `role`, `active`
+### Why this matters
 
-Extends `PanacheEntity`, which provides `id` plus active-record helpers.
+- Local host execution (`mvn quarkus:dev`) typically uses `application.properties` URL (`localhost:5433`).
+- Containerized backend uses internal Docker network URL (`postgres:5432`) via env override.
+- Same code, different runtime binding strategy.
 
-### DTO/record files
+---
+
+## 3) Application config file: `backend/src/main/resources/application.properties`
+
+This file defines default backend runtime behavior.
+
+## Database/ORM
+
+- `quarkus.datasource.db-kind=postgresql`
+- `quarkus.datasource.username=postgres`
+- `quarkus.datasource.password=postgres`
+- `quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5433/userdb`
+- `quarkus.hibernate-orm.database.generation=update`
+- `quarkus.hibernate-orm.log.sql=true`
+
+Interpretation:
+
+- Connect to Postgres on local machine port `5433`.
+- Auto-update schema to match entities (good for local dev, usually stricter in prod).
+- SQL logging enabled for easier debugging.
+
+## CORS
+
+- `quarkus.http.cors=true`
+- `quarkus.http.cors.origins=*`
+- `quarkus.http.cors.headers=...`
+- `quarkus.http.cors.methods=...`
+
+This allows browser frontend calls from different origins during development.
+
+## JWT/security config
+
+- `mp.jwt.verify.issuer=quarkus-crud`
+- `smallrye.jwt.sign.key.location=jwt/privateKey.pem`
+- `mp.jwt.verify.publickey.location=jwt/publicKey.pem`
+- `smallrye.jwt.new-token.signature-algorithm=RS256`
+- `mp.jwt.verify.publickey.algorithm=RS256`
+
+Meaning:
+
+- Tokens created by this service set issuer `quarkus-crud`.
+- Private key signs tokens; public key verifies tokens.
+- RS256 is explicitly configured for both creation and verification.
+
+---
+
+## 4) Backend codebase walkthrough (per crucial file)
+
+## `backend/src/main/java/com/example/users/User.java`
+
+The core entity (`users` table). Extends `PanacheEntity`, so it inherits `id` and ORM helpers.
+
+Fields:
+
+- `name`, `email` for profile data.
+- `username`, `passwordHash`, `role`, `active` for auth/authorization.
+- `@JsonIgnore` on `passwordHash` prevents accidental exposure in API responses.
+
+Includes helper:
+
+- `findByUsername(String username)` for login/profile lookups.
+
+## `backend/src/main/java/com/example/users/PasswordUtils.java`
+
+Security helper wrapping bcrypt:
+
+- `hash(plainPassword)` for storage.
+- `matches(plainPassword, storedHash)` for verification.
+
+Never compare plain passwords directly.
+
+## `backend/src/main/java/com/example/users/AuthResource.java`
+
+Authentication endpoint class (`/auth`).
+
+- `POST /auth/login` marked `@PermitAll`.
+- Validates request payload and credentials.
+- Rejects inactive users.
+- Creates JWT with:
+  - issuer
+  - subject = username
+  - groups = user role
+  - expiration = 8 hours
+- Returns `LoginResponse(token, UserResponse)`.
+
+## `backend/src/main/java/com/example/users/UserResource.java`
+
+Main protected business API class (`/users`).
+
+Endpoints:
+
+- `GET /users` (`@RolesAllowed("admin")`) list all users.
+- `GET /users/search` (`@RolesAllowed({"admin","user"})`) search by name/email.
+- `GET /users/me` (`@RolesAllowed({"admin","user"})`) current profile from token principal.
+- `POST /users` (`@RolesAllowed("admin")`, `@Transactional`) create user.
+- `PUT /users/{id}` (`@RolesAllowed("admin")`, `@Transactional`) partial update.
+- `DELETE /users/{id}` (`@RolesAllowed("admin")`, `@Transactional`) delete user.
+
+Key detail:
+
+- `SecurityIdentity` gives current authenticated principal (`identity.getPrincipal().getName()`), which maps to JWT subject (username).
+
+## DTO/record files under `com/example/users`
 
 - `LoginRequest`, `LoginResponse`
 - `CreateUserRequest`, `UpdateUserRequest`
 - `UserResponse`, `UserSummary`
 
-Purpose: isolate API contracts from persistence model and avoid leaking sensitive fields.
+Why records/DTOs matter:
 
-### `PasswordUtils.java`
+- Keep API contract explicit.
+- Avoid leaking internal entity fields.
+- Enable endpoint-specific response shape (`UserSummary` for lightweight search).
 
-Small helper around bcrypt:
+## `backend/src/main/java/com/example/users/UserSeeder.java`
 
-- `hash(password)`
-- `matches(password, hash)`
+Startup initialization bean:
 
-### `AuthResource.java`
+- Observes `StartupEvent`.
+- Ensures `admin/admin` exists and is active with admin role.
+- Backfills old users with missing username/role/active/password defaults.
+- Runs in transaction so updates persist atomically.
 
-Auth endpoint:
-
-- `POST /auth/login` is `@PermitAll`
-- validates request, verifies credentials + active status
-- creates signed JWT with issuer, subject, role groups, expiry
-- returns token + user data
-
-### `UserResource.java`
-
-User APIs:
-
-- `GET /users` (admin)
-- `GET /users/search` (admin/user)
-- `GET /users/me` (admin/user)
-- `POST /users` (admin)
-- `PUT /users/{id}` (admin)
-- `DELETE /users/{id}` (admin)
-
-Uses:
-
-- `@RolesAllowed` for authorization
-- `@Transactional` for write operations
-- `SecurityIdentity` to resolve current principal for `/users/me`
-
-### `UserSeeder.java`
-
-Startup data initializer:
-
-- ensures default `admin/admin` account exists
-- backfills old/incomplete users with sensible defaults
-- runs on startup event in transactional context
+This prevents local environments from starting in an unusable auth state.
 
 ---
 
-## 4) Security model in practice
+## 5) OpenSSL key generation: commands and rationale
 
-### Login flow
+This backend signs JWTs with RSA key material (asymmetric crypto).
 
-1. Client posts username/password to `/auth/login`.
-2. Backend loads user by username.
-3. Password compared with bcrypt hash.
-4. Inactive users are rejected.
-5. JWT created with:
-   - `iss=quarkus-crud`
-   - `sub=<username>`
-   - `groups=[role]`
-   - expiration 8 hours
+Commands:
 
-### Authorization flow
+```bash
+# 1) Generate RSA private key (2048 bits)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out privateKey.pem
 
-For protected endpoints:
+# 2) Derive matching public key
+openssl pkey -in privateKey.pem -pubout -out publicKey.pem
+```
 
-- token must be valid (signature + issuer + algorithm)
-- required role must exist in JWT `groups`
+Why these commands:
 
-If not, Quarkus denies access before business logic runs.
+- **Private key** is secret and used only by this backend to sign JWTs.
+- **Public key** can be shared and used by verifiers to validate signatures.
+- Asymmetric signing is safer/scalable: verifiers do not need secret signing key.
 
----
+Where files go in this project:
 
-## 5) Database and transactions
+- `backend/src/main/resources/jwt/privateKey.pem`
+- `backend/src/main/resources/jwt/publicKey.pem`
 
-### Panache style used here
+Why not plain strings?
 
-- Reads: `User.listAll()`, `User.find(...)`, `User.findById(...)`
-- Writes: update managed entity fields in transaction, `persist()`, `deleteById()`
-
-`@Transactional` appears on mutating endpoints and startup seeding method.
-
-### Important behavior
-
-In a transaction, loaded entities are managed. Updating fields is enough; ORM flush persists changes automatically.
+- `Jwt.sign()` in this setup expects real key material.
+- Using random plain text as signing key can fail or be insecure.
 
 ---
 
-## 6) JWT key material and configuration
+## 6) Authentication processing (step-by-step)
 
-This project uses RSA key files:
+When frontend calls `POST /auth/login`:
 
-- signing private key: `backend/src/main/resources/jwt/privateKey.pem`
-- verification public key: `backend/src/main/resources/jwt/publicKey.pem`
+1. Request body arrives as `LoginRequest`.
+2. Backend validates non-null fields.
+3. `User.findByUsername(...)` fetches user.
+4. `PasswordUtils.matches(...)` checks bcrypt hash.
+5. If user missing/inactive/wrong password → `401 Unauthorized`.
+6. Backend builds JWT (`iss`, `sub`, `groups`, expiry) and signs with private key.
+7. Response returns token + sanitized user payload.
 
-Configured via:
-
-- `smallrye.jwt.sign.key.location`
-- `mp.jwt.verify.publickey.location`
-- `smallrye.jwt.new-token.signature-algorithm=RS256`
-- `mp.jwt.verify.publickey.algorithm=RS256`
-
-This is production-style asymmetric JWT signing, not plain shared string secrets.
+Frontend stores token and sends `Authorization: Bearer <token>` on later requests.
 
 ---
 
-## 7) Typical endpoint behavior map
+## 7) Authorization processing (step-by-step)
 
-- **Login (`POST /auth/login`)**
-  - 200 on success with token
-  - 400 for malformed request
-  - 401 for invalid credentials/inactive user
+For a protected endpoint (example `GET /users`):
 
-- **List users (`GET /users`)**
-  - admin only
-  - returns full user list (without password hash)
+1. Incoming Bearer token extracted by Quarkus security.
+2. Signature verified with configured public key.
+3. Issuer and algorithm validated (`application.properties`).
+4. Security identity created (principal + groups).
+5. `@RolesAllowed("admin")` evaluated.
+6. If role missing → access denied before endpoint logic.
+7. If role present → resource method executes.
 
-- **Search (`GET /users/search?q=...`)**
-  - admin + user
-  - returns lightweight summaries (`id`, `name`, `email`)
-
-- **Profile (`GET /users/me`)**
-  - admin + user
-  - derives current user from token principal
-
-- **Create/update/delete**
-  - admin only
-  - create returns `201`, delete returns `204`
+This means security checks happen before your business code runs.
 
 ---
 
-## 8) Spring Boot to Quarkus translation quick sheet
+## 8) Data flow examples in this backend
 
-- `@RestController` + `@RequestMapping` → `@Path` resource + method annotations.
-- `@GetMapping/@PostMapping` → `@GET/@POST`.
-- `@Service` injection → CDI constructor injection.
-- `@Entity` + repository methods → Panache entity methods.
-- Spring Security role expressions → `@RolesAllowed`.
-- `ApplicationRunner` seeders → observer method with `@Observes StartupEvent`.
+## Login and profile
+
+- `/auth/login` returns token and user.
+- `/users/me` reads principal from JWT subject and loads matching user.
+
+## Admin CRUD
+
+- Create/update/delete endpoints are transactional.
+- Mutations change entity state and ORM flushes to Postgres.
+
+## Search
+
+- `/users/search?q=...` performs case-insensitive query against name/email.
+- Returns `UserSummary` list to keep payload focused.
 
 ---
 
-## 9) How to read this backend efficiently
+## 9) How to quickly understand this codebase as a new Quarkus dev
 
-Suggested order:
+Recommended order:
 
-1. `pom.xml` (libraries)
-2. `application.properties` (runtime behavior)
-3. `User` entity + DTO records
-4. `AuthResource` (login)
-5. `UserResource` (authorization + CRUD)
-6. `UserSeeder` (startup defaults)
+1. `docker-compose.yml` (runtime wiring)
+2. `backend/pom.xml` (capabilities/extensions)
+3. `application.properties` (security/db behavior)
+4. `User.java` + DTO records (data model and API contracts)
+5. `AuthResource.java` (login/token creation)
+6. `UserResource.java` (role-protected business APIs)
+7. `UserSeeder.java` (startup guarantees)
 
-If you can explain how a JWT from `/auth/login` ends up authorizing `@RolesAllowed` methods in `UserResource`, you already understand the core of this Quarkus backend.
+If you can trace how a JWT created in `AuthResource` becomes a `SecurityIdentity` used by `@RolesAllowed` in `UserResource`, you have mastered the central Quarkus security flow in this project.
