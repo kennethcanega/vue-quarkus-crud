@@ -16,8 +16,6 @@ This guide explains the backend for developers new to Quarkus, with emphasis on 
   - CDI dependency injection support.
 - **`quarkus-oidc`**
   - Validates Keycloak-issued access tokens and maps claims/roles to Quarkus security identity.
-- **`quarkus-elytron-security-common`**
-  - Password hashing utility for local user profile management.
 
 ### Why this changed
 
@@ -68,56 +66,72 @@ These are used by `AuthResource` for direct token/logout HTTP calls.
 
 ## 3) Keycloak implementation steps (detailed + purpose)
 
-### Step 1: Run Keycloak
+> Admin console URL (local): `http://localhost:8180/admin`
 
-**Purpose:** Provide a standards-based identity server that issues signed access/refresh tokens.
+### Step 1: Start stack
 
-`docker-compose.yml` now includes a `keycloak` service (admin/admin, port `8180`).
-
-You can still run Keycloak manually if needed:
+**Purpose:** Bring up Postgres + Keycloak + backend together.
 
 ```bash
-docker run --name quarkus-keycloak \
-  -p 8180:8080 \
-  -e KEYCLOAK_ADMIN=admin \
-  -e KEYCLOAK_ADMIN_PASSWORD=admin \
-  quay.io/keycloak/keycloak:25.0.6 \
-  start-dev
+docker compose up --build
 ```
+
+Keycloak needs extra warm-up time. The backend uses `quarkus.oidc.connection-delay` so startup race conditions are tolerated.
 
 ### Step 2: Create realm `quarkus-crud`
 
-**Purpose:** Keep this app’s identity domain isolated.
+**Purpose:** Identity boundary for this app.
 
-### Step 3: Create realm roles `admin` and `user`
+UI path:
+- Realm dropdown (top-left) → **Create realm** → name `quarkus-crud`.
 
-**Purpose:** Match the exact roles enforced by backend security annotations.
+### Step 3: Create realm roles
+
+**Purpose:** These map directly to backend role guards.
+
+UI path:
+- **Realm roles** → create `admin`
+- **Realm roles** → create `user`
 
 ### Step 4: Create client `quarkus-crud-client`
 
-**Purpose:** Let backend exchange credentials/refresh tokens with Keycloak securely.
+**Purpose:** Backend uses this client for token exchange and admin operations.
 
-Required settings:
+UI path:
+- **Clients** → **Create client**
+- Type: OpenID Connect
+- ID: `quarkus-crud-client`
+- Settings:
+  - Client authentication: enabled
+  - Direct access grants: enabled
+  - Authorization: disabled
 
-- Client authentication: enabled
-- Direct access grants: enabled (required for username/password grant in `/auth/login`)
+Then open **Credentials** tab and copy client secret.
 
-Copy generated client secret.
+### Step 5: Grant service-account roles
 
-Enable **Service Accounts** and grant realm-management roles (`manage-users`, `view-users`, `view-realm`).
-These permissions are required so backend user CRUD can provision accounts in Keycloak SSO.
+**Purpose:** Required for backend provisioning in Manage Users.
 
-### Step 5: Create users and assign roles
+UI path:
+- Client `quarkus-crud-client` → **Service account roles** tab
+- Select client `realm-management`
+- Assign:
+  - `manage-users`
+  - `view-users`
+  - `view-realm`
 
-**Purpose:** Users authenticated by Keycloak must carry valid role claims.
+### Step 6: Create admin login user
 
-At minimum create:
+**Purpose:** first app login account.
 
-- `admin` user with `admin` role.
+UI path:
+- **Users** → **Create new user** (`admin`)
+- **Credentials** tab → set non-temporary password
+- **Role mapping** tab → assign realm role `admin`
 
-### Step 6: Export env vars for backend
+### Step 7: Set backend env vars
 
-**Purpose:** Inject realm/client coordinates at runtime without hardcoding secrets.
+**Purpose:** Bind backend OIDC and admin-client config to created realm/client.
 
 ```bash
 export KEYCLOAK_SERVER_URL="http://localhost:8180"
@@ -127,15 +141,14 @@ export KEYCLOAK_CLIENT_SECRET="<your-client-secret>"
 export AUTH_REFRESH_COOKIE_SECURE="false"
 ```
 
-### Step 7: Start backend
+### Step 8: Production guidance
 
-**Purpose:** Activate Quarkus OIDC verification and Keycloak-backed auth broker endpoints.
-
-```bash
-cd backend
-mvn quarkus:dev
-```
-
+- Use production Keycloak mode (not `start-dev`) with managed database.
+- Enforce HTTPS end-to-end.
+- Put client secret in secure secret store.
+- Keep service account privileges minimal.
+- Enable stricter password/MFA/lockout policies in realm.
+- Rotate secrets periodically and audit admin events.
 ---
 
 ## 3.1) User data ownership (important)

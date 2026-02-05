@@ -56,75 +56,93 @@ Vue (frontend) --> Quarkus API (backend) --> PostgreSQL
 
 ## Keycloak Setup (Detailed, With Purpose)
 
+> Keycloak Admin Console URL: `http://localhost:8180/admin` (local docker-compose dev stack).
+
 ### 1) Start Keycloak
 
-**Purpose:** Run an OIDC provider that issues and validates user tokens.
+**Purpose:** Run an identity provider that issues signed access and refresh tokens.
 
-This repository now includes Keycloak in `docker-compose.yml`, exposed at `http://localhost:8180` (admin/admin by default).
-
-If you prefer running it separately, you can still use:
+This repository includes Keycloak in `docker-compose.yml`.
 
 ```bash
-docker run --name quarkus-keycloak \
-  -p 8180:8080 \
-  -e KEYCLOAK_ADMIN=admin \
-  -e KEYCLOAK_ADMIN_PASSWORD=admin \
-  quay.io/keycloak/keycloak:25.0.6 \
-  start-dev
+docker compose up --build
 ```
 
-Admin console: `http://localhost:8180`.
+Keycloak can take 15-60 seconds to become fully ready. The backend is configured with OIDC connection delay so early startup races do not break the app.
 
-### 2) Create Realm
+### 2) Log in to the Admin Console
 
-**Purpose:** Isolate this project’s users/roles/clients from other applications.
+**Purpose:** All realm/client/user setup is done in Keycloak Admin UI.
 
-1. Log in to Keycloak admin console.
-2. Create realm: `quarkus-crud`.
+1. Open `http://localhost:8180/admin`.
+2. Log in with:
+   - Username: `admin`
+   - Password: `admin`
 
-### 3) Create Realm Roles
+### 3) Create realm `quarkus-crud`
 
-**Purpose:** Provide the exact roles Quarkus checks with `@RolesAllowed`.
+**Purpose:** A realm isolates this application's users, roles, and clients from other apps.
 
-Create roles:
+Navigation:
+1. Top-left realm dropdown (usually `master`) → **Create realm**.
+2. Realm name: `quarkus-crud`.
+3. Click **Create**.
 
-* `admin`
-* `user`
+### 4) Create realm roles `admin` and `user`
 
-### 4) Create Client
+**Purpose:** Backend authorization (`@RolesAllowed`) checks these exact role names.
 
-**Purpose:** Allow backend to exchange username/password and refresh token grants securely.
+Navigation:
+1. Left menu → **Realm roles**.
+2. Click **Create role** → name `admin` → save.
+3. Click **Create role** → name `user` → save.
 
-Create client:
+### 5) Create OIDC client `quarkus-crud-client`
 
-* Client ID: `quarkus-crud-client`
-* Client authentication: **Enabled**
-* Authorization: Disabled
-* Standard flow: Optional
-* Direct access grants: **Enabled** (required for `/auth/login` password grant)
+**Purpose:** The backend uses this client to:
+- exchange username/password (`/auth/login`),
+- refresh sessions (`/auth/refresh`),
+- call Keycloak Admin API for Manage Users provisioning.
 
-After creating client, generate/copy the **client secret**.
+Navigation:
+1. Left menu → **Clients** → **Create client**.
+2. Client type: **OpenID Connect**.
+3. Client ID: `quarkus-crud-client`.
+4. Continue and set:
+   - **Client authentication**: ON
+   - **Authorization**: OFF
+   - **Direct access grants**: ON
+   - (Standard flow may stay ON/OFF; not required for current backend broker flow)
+5. Save, then open **Credentials** tab and copy the client secret.
 
-Also enable **Service Accounts** for this client and grant it realm-management roles needed for user administration (at minimum: `manage-users`, `view-users`, `view-realm`).
-This is required because the backend creates/updates/deletes users in Keycloak from the Manage Users screen.
+### 6) Enable Service Account and grant admin API roles
 
-### 5) Create Users and Assign Roles
+**Purpose:** Without these permissions, Manage Users cannot create/update/delete Keycloak users.
 
-**Purpose:** Keycloak is now the source of authentication and role claims.
+Navigation:
+1. Open client `quarkus-crud-client`.
+2. Ensure **Service accounts roles** is enabled.
+3. Go to **Service account roles** tab.
+4. In client roles selector choose `realm-management`.
+5. Assign at minimum:
+   - `manage-users`
+   - `view-users`
+   - `view-realm`
 
-Create at least:
+### 7) Create initial admin user in Keycloak
 
-* Username: `admin`
-* Password: `admin` (or stronger password)
-* Assign role: `admin`
+**Purpose:** This is the account used to sign in to the app initially.
 
-For non-admin users, assign `user` role.
+Navigation:
+1. Left menu → **Users** → **Create new user**.
+2. Username: `admin`, Email (optional), Email verified as needed.
+3. Save.
+4. Open **Credentials** tab → set password (for example `admin`) and disable temporary password.
+5. Open **Role mapping** tab → assign realm role `admin`.
 
-### 6) Configure Backend Environment
+### 8) Configure backend env vars
 
-**Purpose:** Point Quarkus to the correct Keycloak realm/client.
-
-Set:
+**Purpose:** Tell Quarkus which realm/client to trust and use.
 
 ```bash
 export KEYCLOAK_SERVER_URL="http://localhost:8180"
@@ -135,6 +153,15 @@ export CORS_ORIGINS="http://localhost:5173"
 export AUTH_REFRESH_COOKIE_SECURE="false"
 ```
 
+### 9) Production-level recommendations (important)
+
+1. **Do not use `start-dev`** in production; run Keycloak with production settings and persistent external DB.
+2. Put Keycloak behind HTTPS + trusted reverse proxy.
+3. Store `KEYCLOAK_CLIENT_SECRET` in secret manager (Vault/K8s secrets/AWS/GCP secrets), never in git.
+4. Restrict service-account roles to least privilege.
+5. Use stronger password and MFA policies in Keycloak realm.
+6. Set `AUTH_REFRESH_COOKIE_SECURE=true` and use strict CORS origins.
+7. Configure backup/restore for both Postgres and Keycloak DB.
 ---
 
 ## How To Run (Step-by-Step)
