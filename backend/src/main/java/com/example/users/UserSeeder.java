@@ -22,7 +22,8 @@ public class UserSeeder {
             admin.persist();
         }
 
-        User.findAll().list().forEach(this::backfillUser);
+        java.util.List<User> users = User.listAll();
+        users.forEach(this::backfillUser);
     }
 
     private void backfillUser(User user) {
