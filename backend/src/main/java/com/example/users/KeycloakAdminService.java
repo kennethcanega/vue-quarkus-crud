@@ -216,6 +216,25 @@ public class KeycloakAdminService {
         }
     }
 
+    private String findUserIdByUsernameWithRetry(String username, String adminToken) {
+        final int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            String userId = findUserIdByUsername(username, adminToken);
+            if (!isBlank(userId)) {
+                return userId;
+            }
+            if (attempt < maxAttempts) {
+                try {
+                    Thread.sleep(Duration.ofMillis(250));
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
     private String findUserIdByUsername(String username, String adminToken) {
         HttpResponse<String> exactResponse = sendJson(
                 "GET",
