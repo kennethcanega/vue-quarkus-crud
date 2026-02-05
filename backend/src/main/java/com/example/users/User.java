@@ -1,6 +1,5 @@
 package com.example.users;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.quarkus.hibernate.orm.panache.PanacheEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -15,12 +14,11 @@ public class User extends PanacheEntity {
     @Column(nullable = false, unique = true)
     public String email;
 
-    @Column(unique = true)
+    @Column(unique = true, nullable = false)
     public String username;
 
-    @JsonIgnore
-    @Column
-    public String passwordHash;
+    @Column(name = "keycloak_user_id", unique = true)
+    public String keycloakUserId;
 
     @Column
     public String role;

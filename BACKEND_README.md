@@ -104,6 +104,9 @@ Required settings:
 
 Copy generated client secret.
 
+Enable **Service Accounts** and grant realm-management roles (`manage-users`, `view-users`, `view-realm`).
+These permissions are required so backend user CRUD can provision accounts in Keycloak SSO.
+
 ### Step 5: Create users and assign roles
 
 **Purpose:** Users authenticated by Keycloak must carry valid role claims.
@@ -135,6 +138,14 @@ mvn quarkus:dev
 
 ---
 
+## 3.1) User data ownership (important)
+
+- Keycloak stores authentication credentials (passwords).
+- Local `users` table stores only app profile + authorization metadata (`name`, `email`, `username`, `role`, `active`, optional `keycloakUserId`).
+- The backend no longer stores password hashes.
+
+---
+
 ## 4) Auth flow in code (`AuthResource`)
 
 `/auth/*` endpoints now broker Keycloak flows:
@@ -163,6 +174,12 @@ Purpose of keeping `/auth/*` in backend:
 ---
 
 ## 5) Protected APIs (`UserResource`)
+
+Manage-users operations are synchronized to Keycloak via `KeycloakAdminService`:
+- create: creates Keycloak user, sets password, assigns role, then persists local profile
+- update: updates Keycloak profile/enabled state/role/password then updates local row
+- delete: removes Keycloak user then deletes local row
+
 
 Security remains annotation-based:
 

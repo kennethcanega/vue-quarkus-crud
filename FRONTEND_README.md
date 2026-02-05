@@ -179,6 +179,7 @@ All views use `<script setup>` (Composition API style).
 ### `ManageUsersView.vue` (admin)
 
 - Handles list, create, edit, block/reactivate, delete.
+- Create/edit/delete actions are synced by backend to Keycloak, so newly created users can sign in through the same login page.
 - Single form supports create/edit based on `editingId`.
 - Refreshes list after mutations.
 

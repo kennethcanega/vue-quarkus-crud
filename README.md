@@ -19,6 +19,7 @@ You can log in, view your profile, search users, and (if you are an admin) manag
 * **Roles:** `admin` and `user` (from Keycloak `realm_access.roles`)
 * **Menu + routing** in Vue hides or shows features based on role
 * **Backend enforcement** blocks non-admin access to admin endpoints using `@RolesAllowed`
+* **Manage users provisions Keycloak users** so newly created users can immediately log in via app login
 
 ### Default Account
 
@@ -49,6 +50,7 @@ Vue (frontend) --> Quarkus API (backend) --> PostgreSQL
 * Quarkus brokers credential/token exchanges with Keycloak OIDC endpoints.
 * Access tokens are stored by the frontend in `localStorage`; refresh tokens are stored as HTTP-only cookies.
 * Quarkus validates Bearer tokens using OIDC configuration and enforces roles with `@RolesAllowed`.
+* User credentials (passwords) are stored only in Keycloak; backend DB stores app profile/role metadata only.
 
 ---
 
@@ -102,6 +104,9 @@ Create client:
 * Direct access grants: **Enabled** (required for `/auth/login` password grant)
 
 After creating client, generate/copy the **client secret**.
+
+Also enable **Service Accounts** for this client and grant it realm-management roles needed for user administration (at minimum: `manage-users`, `view-users`, `view-realm`).
+This is required because the backend creates/updates/deletes users in Keycloak from the Manage Users screen.
 
 ### 5) Create Users and Assign Roles
 
@@ -186,7 +191,7 @@ export VITE_AUTH_REFRESH_INTERVAL_MS="5000"
 | Method | Endpoint      | Description    |
 | -----: | ------------- | -------------- |
 |    GET | `/users`      | List all users |
-|   POST | `/users`      | Create user    |
+|   POST | `/users`      | Create user in app DB + Keycloak SSO    |
 |    PUT | `/users/{id}` | Update user    |
 | DELETE | `/users/{id}` | Delete user    |
 

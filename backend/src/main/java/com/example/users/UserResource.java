@@ -1,7 +1,6 @@
 package com.example.users;
 
 import io.quarkus.security.identity.SecurityIdentity;
-import org.eclipse.microprofile.jwt.JsonWebToken;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
@@ -19,6 +18,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 
 @Path("/users")
 @Produces(MediaType.APPLICATION_JSON)
@@ -27,10 +27,12 @@ public class UserResource {
 
     private final SecurityIdentity identity;
     private final JsonWebToken jsonWebToken;
+    private final KeycloakAdminService keycloakAdminService;
 
-    public UserResource(SecurityIdentity identity, JsonWebToken jsonWebToken) {
+    public UserResource(SecurityIdentity identity, JsonWebToken jsonWebToken, KeycloakAdminService keycloakAdminService) {
         this.identity = identity;
         this.jsonWebToken = jsonWebToken;
+        this.keycloakAdminService = keycloakAdminService;
     }
 
     @GET
@@ -77,23 +79,40 @@ public class UserResource {
     @Transactional
     public Response create(CreateUserRequest request) {
         if (request == null
-                || request.username() == null
-                || request.password() == null
-                || request.name() == null
-                || request.email() == null) {
+                || isBlank(request.username())
+                || isBlank(request.password())
+                || isBlank(request.name())
+                || isBlank(request.email())) {
             return Response.status(Response.Status.BAD_REQUEST).build();
         }
-        User existing = User.findByUsername(request.username());
-        if (existing != null) {
+        if (User.findByUsername(request.username()) != null) {
             return Response.status(Response.Status.CONFLICT).build();
         }
+
+        String role = Optional.ofNullable(request.role()).orElse("user");
+        Boolean active = Optional.ofNullable(request.active()).orElse(true);
+
+        String keycloakUserId = keycloakAdminService.createUser(new KeycloakAdminService.CreateUserCommand(
+                request.username(),
+                request.email(),
+                request.name(),
+                request.password(),
+                role,
+                active));
+
+        if (keycloakUserId == null) {
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("Failed to create user in Keycloak")
+                    .build();
+        }
+
         User user = new User();
         user.name = request.name();
         user.email = request.email();
         user.username = request.username();
-        user.passwordHash = PasswordUtils.hash(request.password());
-        user.role = Optional.ofNullable(request.role()).orElse("user");
-        user.active = Optional.ofNullable(request.active()).orElse(true);
+        user.keycloakUserId = keycloakUserId;
+        user.role = role;
+        user.active = active;
         user.persist();
         return Response.status(Response.Status.CREATED).entity(UserResponse.from(user)).build();
     }
@@ -102,30 +121,41 @@ public class UserResource {
     @Path("/{id}")
     @RolesAllowed("admin")
     @Transactional
-    public UserResponse update(@PathParam("id") Long id, UpdateUserRequest updated) {
+    public Response update(@PathParam("id") Long id, UpdateUserRequest updated) {
         User user = User.findById(id);
         if (user == null) {
             throw new NotFoundException();
         }
-        if (updated.name() != null) {
-            user.name = updated.name();
+
+        String targetName = Optional.ofNullable(updated.name()).orElse(user.name);
+        String targetEmail = Optional.ofNullable(updated.email()).orElse(user.email);
+        String targetUsername = Optional.ofNullable(updated.username()).orElse(user.username);
+        String targetRole = Optional.ofNullable(updated.role()).orElse(user.role);
+        Boolean targetActive = Optional.ofNullable(updated.active()).orElse(user.active);
+
+        boolean synced = keycloakAdminService.updateUser(
+                user.keycloakUserId,
+                new KeycloakAdminService.UpdateUserCommand(
+                        targetUsername,
+                        targetEmail,
+                        targetName,
+                        updated.password(),
+                        targetRole,
+                        targetActive));
+
+        if (!synced) {
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("Failed to update user in Keycloak")
+                    .build();
         }
-        if (updated.email() != null) {
-            user.email = updated.email();
-        }
-        if (updated.username() != null) {
-            user.username = updated.username();
-        }
-        if (updated.password() != null && !updated.password().isBlank()) {
-            user.passwordHash = PasswordUtils.hash(updated.password());
-        }
-        if (updated.role() != null) {
-            user.role = updated.role();
-        }
-        if (updated.active() != null) {
-            user.active = updated.active();
-        }
-        return UserResponse.from(user);
+
+        user.name = targetName;
+        user.email = targetEmail;
+        user.username = targetUsername;
+        user.role = targetRole;
+        user.active = targetActive;
+
+        return Response.ok(UserResponse.from(user)).build();
     }
 
     @DELETE
@@ -133,10 +163,23 @@ public class UserResource {
     @RolesAllowed("admin")
     @Transactional
     public Response delete(@PathParam("id") Long id) {
-        boolean deleted = User.deleteById(id);
-        if (!deleted) {
+        User user = User.findById(id);
+        if (user == null) {
             throw new NotFoundException();
         }
+
+        boolean keycloakDeleted = keycloakAdminService.deleteUser(user.keycloakUserId);
+        if (!keycloakDeleted) {
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("Failed to delete user in Keycloak")
+                    .build();
+        }
+
+        user.delete();
         return Response.noContent().build();
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }
