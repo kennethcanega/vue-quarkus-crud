@@ -240,6 +240,25 @@ Verification steps:
 4. Stored `keycloak_user_id` equals Keycloak user UUID exactly.
 
 
+
+
+## 3.5) Troubleshooting `POST /users` returns 502
+
+Potential causes:
+- Keycloak client credentials are invalid.
+- Service account lacks required admin permissions.
+- Keycloak user already exists from a previous partial run.
+
+Current backend behavior:
+- On Keycloak create `409`, backend resolves existing user id and proceeds with local sync.
+- Role mapping failures are logged but do not fail create/update API responses.
+
+Required service account roles (realm-management):
+- `manage-users`
+- `view-users`
+- `view-realm`
+
+
 ---
 
 ## 4) Auth flow in code (`AuthResource`)
@@ -272,8 +291,8 @@ Purpose of keeping `/auth/*` in backend:
 ## 5) Protected APIs (`UserResource`)
 
 Manage-users operations are synchronized to Keycloak via `KeycloakAdminService`:
-- create: creates Keycloak user, sets password, assigns role, then persists local profile
-- update: updates Keycloak profile/enabled state/role/password then updates local row
+- create: creates Keycloak user, sets password, attempts role assignment, then persists local profile
+- update: updates Keycloak profile/enabled state/role/password, attempts role assignment, then updates local row
 - delete: removes Keycloak user then deletes local row
 
 

@@ -190,7 +190,7 @@ public class AuthResource {
         if (isBlank(accessToken)) {
             return null;
         }
-        String[] tokenParts = accessToken.split("\.");
+        String[] tokenParts = accessToken.split("\\.");
         if (tokenParts.length < 2) {
             return null;
         }

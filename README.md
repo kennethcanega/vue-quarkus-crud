@@ -240,6 +240,25 @@ Why this can happen:
 If it still fails, verify the `keycloak_user_id` stored locally matches Keycloak user ID exactly.
 
 
+
+
+### 13) Troubleshooting: `POST /users` returns 502
+
+Common causes:
+1. Keycloak client secret mismatch (`invalid_client_credentials`).
+2. Service account lacks permissions for admin APIs.
+3. User already exists in Keycloak (conflict), often after a previous partial failure.
+
+What changed in backend:
+- User creation now handles Keycloak `409 Conflict` by resolving the existing Keycloak user id and continuing local sync.
+- Role assignment is best-effort (create/update do not fail hard if role mapping fails).
+
+Recommended Keycloak service account roles:
+- `manage-users`
+- `view-users`
+- `view-realm`
+
+
 ---
 
 ## How To Run (Step-by-Step)

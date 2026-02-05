@@ -15,10 +15,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.logging.Logger;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
 public class KeycloakAdminService {
+
+    private static final Logger LOGGER = Logger.getLogger(KeycloakAdminService.class.getName());
 
     @ConfigProperty(name = "keycloak.server-url")
     String keycloakServerUrl;
@@ -60,20 +63,27 @@ public class KeycloakAdminService {
                 "temporary", false)));
 
         HttpResponse<String> response = sendJson("POST", adminUsersEndpoint(), adminToken, payload);
-        if (response == null || (response.statusCode() != 201 && response.statusCode() != 204)) {
+        if (response == null) {
             return null;
         }
 
-        String userId = extractCreatedUserId(response);
-        if (userId == null) {
+        String userId;
+        if (response.statusCode() == 201 || response.statusCode() == 204) {
+            userId = extractCreatedUserId(response);
+            if (userId == null) {
+                userId = findUserIdByUsername(command.username(), adminToken);
+            }
+        } else if (response.statusCode() == 409) {
             userId = findUserIdByUsername(command.username(), adminToken);
+        } else {
+            return null;
         }
         if (userId == null) {
             return null;
         }
 
         if (!assignRealmRole(userId, command.role(), adminToken)) {
-            return null;
+            LOGGER.warning("Keycloak user created but role assignment failed for username=" + command.username());
         }
         return userId;
     }
@@ -99,7 +109,10 @@ public class KeycloakAdminService {
             return false;
         }
 
-        return assignRealmRole(keycloakUserId, command.role(), adminToken);
+        if (!assignRealmRole(keycloakUserId, command.role(), adminToken)) {
+            LOGGER.warning("Keycloak user updated but role assignment failed for userId=" + keycloakUserId);
+        }
+        return true;
     }
 
     public boolean deleteUser(String keycloakUserId) {
@@ -121,7 +134,7 @@ public class KeycloakAdminService {
     }
 
     private boolean assignRealmRole(String userId, String roleName, String adminToken) {
-        String finalRole = isBlank(roleName) ? "user" : roleName;
+        String finalRole = isBlank(roleName) ? "user" : roleName.trim().toLowerCase();
 
         JsonNode adminRole = getRole(finalRole, adminToken);
         JsonNode userRole = getRole("user", adminToken);
