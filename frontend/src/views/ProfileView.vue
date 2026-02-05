@@ -1,7 +1,8 @@
 <template>
   <section class="card">
     <h2>My Profile</h2>
-    <div v-if="loading" class="status">Loading...</div>
+    <p class="muted">Account identity and access status.</p>
+    <div v-if="loading" class="status">Loading profile...</div>
     <div v-else-if="profile" class="profile-grid">
       <div>
         <p class="label">Name</p>
@@ -48,3 +49,17 @@ const fetchProfile = async () => {
 
 onMounted(fetchProfile);
 </script>
+
+<style scoped>
+.profile-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.label {
+  color: #7a8ea9;
+  font-size: 0.85rem;
+  margin: 0 0 0.25rem;
+}
+</style>

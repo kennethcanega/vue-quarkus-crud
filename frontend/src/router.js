@@ -43,7 +43,11 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   if (isAuthenticated.value && !state.user) {
-    await loadProfile();
+    try {
+      await loadProfile();
+    } catch (error) {
+      return { path: '/login' };
+    }
   }
 
   if (to.meta.requiresAuth && !isAuthenticated.value) {

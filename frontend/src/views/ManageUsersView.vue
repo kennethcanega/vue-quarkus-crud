@@ -1,6 +1,7 @@
 <template>
   <section class="card">
     <h2>{{ editingId ? 'Update User' : 'Create User' }}</h2>
+    <p class="muted">Provision and maintain user access from one place.</p>
     <form @submit.prevent="handleSubmit">
       <div class="grid">
         <div class="field">
@@ -180,3 +181,9 @@ const resetForm = () => {
 
 onMounted(fetchUsers);
 </script>
+
+<style scoped>
+.checkbox {
+  justify-content: center;
+}
+</style>
