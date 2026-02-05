@@ -1,130 +1,46 @@
 <template>
-  <div class="container">
-    <header>
-      <h1>Users</h1>
-      <p>Simple CRUD powered by Vue 3 + Quarkus + Postgres.</p>
+  <div class="app-shell">
+    <header class="top-bar">
+      <div>
+        <h1>Team Directory</h1>
+        <p>Secure user management with role-based access.</p>
+      </div>
+      <div class="auth-actions" v-if="isAuthenticated">
+        <span class="pill pill-neutral">{{ currentUser?.username }}</span>
+        <button class="secondary" @click="handleLogout">Logout</button>
+      </div>
     </header>
 
-    <section class="card">
-      <h2>{{ editingId ? 'Update User' : 'Create User' }}</h2>
-      <form @submit.prevent="handleSubmit">
-        <div class="field">
-          <label for="name">Name</label>
-          <input id="name" v-model="form.name" required placeholder="Jane Doe" />
-        </div>
-        <div class="field">
-          <label for="email">Email</label>
-          <input id="email" v-model="form.email" required type="email" placeholder="jane@example.com" />
-        </div>
-        <div class="actions">
-          <button type="submit">{{ editingId ? 'Save' : 'Add' }}</button>
-          <button type="button" class="secondary" @click="resetForm">Clear</button>
-        </div>
-      </form>
-    </section>
+    <nav v-if="isAuthenticated" class="menu">
+      <RouterLink to="/profile">My Profile</RouterLink>
+      <RouterLink to="/search">Search</RouterLink>
+      <RouterLink v-if="isAdmin" to="/users">Manage Users</RouterLink>
+    </nav>
 
-    <section class="card">
-      <h2>Existing Users</h2>
-      <div v-if="loading" class="status">Loading...</div>
-      <div v-else-if="errorMessage" class="status error">{{ errorMessage }}</div>
-      <div v-else-if="users.length === 0" class="status">No users yet.</div>
-      <table v-else>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="user in users" :key="user.id">
-            <td>{{ user.name }}</td>
-            <td>{{ user.email }}</td>
-            <td>
-              <button class="secondary" @click="startEdit(user)">Edit</button>
-              <button class="danger" @click="removeUser(user.id)">Delete</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+    <main class="container">
+      <RouterView />
+    </main>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
-import axios from 'axios';
+import { computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
+import { isAdmin, isAuthenticated, loadProfile, logout, state } from './services/auth';
 
-const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
-const users = ref([]);
-const loading = ref(false);
-const errorMessage = ref('');
-const editingId = ref(null);
-const form = reactive({
-  name: '',
-  email: ''
+const router = useRouter();
+const currentUser = computed(() => state.user);
+
+const handleLogout = () => {
+  logout();
+  router.push('/login');
+};
+
+onMounted(async () => {
+  if (isAuthenticated.value && !state.user) {
+    await loadProfile();
+  }
 });
-
-const fetchUsers = async () => {
-  loading.value = true;
-  errorMessage.value = '';
-  try {
-    const response = await axios.get(`${apiBase}/users`);
-    users.value = response.data;
-  } catch (error) {
-    errorMessage.value = 'Unable to load users. Check the backend connection.';
-  } finally {
-    loading.value = false;
-  }
-};
-
-const handleSubmit = async () => {
-  errorMessage.value = '';
-  try {
-    if (editingId.value) {
-      await axios.put(`${apiBase}/users/${editingId.value}`, {
-        name: form.name,
-        email: form.email
-      });
-    } else {
-      await axios.post(`${apiBase}/users`, {
-        name: form.name,
-        email: form.email
-      });
-    }
-    await fetchUsers();
-    resetForm();
-  } catch (error) {
-    errorMessage.value = 'Unable to save user. Check the backend connection.';
-  }
-};
-
-const startEdit = (user) => {
-  editingId.value = user.id;
-  form.name = user.name;
-  form.email = user.email;
-};
-
-const removeUser = async (id) => {
-  errorMessage.value = '';
-  try {
-    await axios.delete(`${apiBase}/users/${id}`);
-    await fetchUsers();
-    if (editingId.value === id) {
-      resetForm();
-    }
-  } catch (error) {
-    errorMessage.value = 'Unable to delete user. Check the backend connection.';
-  }
-};
-
-const resetForm = () => {
-  editingId.value = null;
-  form.name = '';
-  form.email = '';
-};
-
-onMounted(fetchUsers);
 </script>
 
 <style scoped>
@@ -138,19 +54,59 @@ body {
   background: #f5f7fb;
 }
 
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
 .container {
-  max-width: 900px;
+  max-width: 1000px;
   margin: 0 auto;
-  padding: 2rem 1.5rem 3rem;
+  padding: 1.5rem;
 }
 
-header {
-  margin-bottom: 2rem;
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  background: #0f172a;
+  color: #f8fafc;
 }
 
-h1 {
+.top-bar h1 {
   margin: 0 0 0.25rem;
-  font-size: 2rem;
+  font-size: 1.75rem;
+}
+
+.top-bar p {
+  margin: 0;
+  color: #cbd5f5;
+}
+
+.menu {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.menu a {
+  text-decoration: none;
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.menu a.router-link-active {
+  color: #2563eb;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .card {
@@ -168,7 +124,18 @@ h1 {
   margin-bottom: 1rem;
 }
 
-input {
+.grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.checkbox {
+  align-items: center;
+}
+
+input,
+select {
   border: 1px solid #d7dde5;
   border-radius: 8px;
   padding: 0.6rem 0.75rem;
@@ -178,13 +145,14 @@ input {
 .actions {
   display: flex;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 button {
   border: none;
   padding: 0.6rem 1rem;
   border-radius: 8px;
-  background: #1d4ed8;
+  background: #2563eb;
   color: #ffffff;
   font-weight: 600;
   cursor: pointer;
@@ -217,5 +185,73 @@ td {
 
 .status.error {
   color: #dc2626;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pill-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pill-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.pill-neutral {
+  background: #e2e8f0;
+  color: #1f2937;
+}
+
+.auth-card {
+  max-width: 420px;
+  margin: 2rem auto;
+}
+
+.muted {
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
+.search-form {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.search-results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.search-results li {
+  background: #f8fafc;
+  padding: 0.75rem;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.label {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  margin: 0 0 0.25rem;
 }
 </style>
