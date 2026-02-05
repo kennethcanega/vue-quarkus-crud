@@ -1,157 +1,244 @@
-# Vue + Quarkus + Postgres CRUD (Experimental)
+# Vue + Quarkus + Postgres CRUD (JWT + Roles)
 
-This repo contains a minimal CRUD stack:
+This project is a secure, full-stack CRUD app with **JWT authentication** and **role-based access**:
 
-- **Frontend:** Vue 3 + Vite
-- **Backend:** Java 21 + Quarkus (REST + Hibernate Panache)
-- **Database:** PostgreSQL (Docker container)
+* **Frontend:** Vue 3 + Vite + Vue Router
+* **Backend:** Java 21 + Quarkus (REST + Hibernate Panache + SmallRye JWT)
+* **Database:** PostgreSQL (Docker)
 
-The UI allows you to **create, list, update, and delete** users.
+You can log in, view your profile, search users, and (if you are an admin) manage users end-to-end.
+
+---
+
+## Features at a Glance
+
+### Authentication + Authorization
+
+* **JWT login** (`/auth/login`)
+* **Roles:** `admin` and `user`
+* **Menu + routing** in Vue hides or shows features based on role
+* **Backend enforcement** blocks non-admin access to admin endpoints
+
+### Default Account
+
+* Username: **admin**
+* Password: **admin**
+
+### Role Capabilities
+
+| Feature               | Admin | Regular user |
+| --------------------- | ----- | ------------ |
+| Login                 | ✅     | ✅            |
+| View profile          | ✅     | ✅            |
+| Search users          | ✅     | ✅            |
+| Manage users (CRUD)   | ✅     | ❌            |
+| Block/reactivate user | ✅     | ❌            |
 
 ---
 
 ## Architecture Overview
 
 ```
-frontend (Vue)  -->  backend (Quarkus)  -->  postgres
+Vue (frontend) --> Quarkus API (backend) --> PostgreSQL
 ```
 
-- Vue talks to Quarkus via HTTP (`/users` REST endpoints).
-- Quarkus uses Hibernate ORM Panache to map a `User` entity to the `users` table.
-- Postgres runs in Docker for a repeatable local environment.
+* Vue authenticates with `/auth/login` and stores a JWT in `localStorage`.
+* Axios sends the JWT in the `Authorization: Bearer <token>` header.
+* Quarkus verifies the token and enforces roles with `@RolesAllowed`.
 
 ---
 
-## Step-by-Step: How This Experimental Project Was Built
+## Backend Walkthrough (Quarkus)
 
-### 1) Create the repository structure
+### 1) Entity model (`User`)
+
+The `User` entity stores authentication fields in addition to profile data:
+
+* `username` (unique login handle)
+* `passwordHash` (bcrypt, never returned to clients)
+* `role` (`admin` or `user`)
+* `active` (blocked vs active)
+* `name` and `email` (display + search)
+
+This lets us enforce **both** login security and business logic in the same table.
+
+---
+
+### 2) JWT Login (`/auth/login`)
+
+The login endpoint:
+
+1. Verifies username/password.
+2. Rejects inactive users.
+3. Builds a JWT with:
+
+   * `sub` = username
+   * `groups` = role
+
+The JWT is signed using **RSA (RS256)** with a private key.
+
+> Plain text secrets are **not supported** when using `Jwt.sign()` in Quarkus.
+> The backend must use real cryptographic key material.
+
+---
+
+### 3) Role-protected endpoints
+
+Quarkus uses annotations to enforce access:
+
+* `@RolesAllowed("admin")` for admin-only endpoints like `/users` CRUD
+* `@RolesAllowed({"admin", "user"})` for `/users/search` and `/users/me`
+* `@PermitAll` for `/auth/login`
+
+This means **even curl/Postman users are blocked** unless they have a valid JWT with the right role.
+
+---
+
+### 4) Default admin seeding
+
+On startup, a default admin is created **if it does not already exist**:
 
 ```
-.
-├── backend
-├── frontend
-└── docker-compose.yml
+username: admin
+password: admin
+role: admin
 ```
 
-We split the backend and frontend into separate folders to keep build tools isolated and easy to manage.
+You can then create additional users in the admin UI.
 
-### 2) Backend: Quarkus + Java 21 CRUD API
+If you already have users from the original CRUD app, startup will backfill:
 
-**Key files created:**
+* `username` derived from email (or a fallback)
+* `role` set to `user`
+* `active` set to `true`
+* `password` set to **changeme** (bcrypt hash stored)
 
-- `backend/pom.xml`
-- `backend/src/main/resources/application.properties`
-- `backend/src/main/java/com/example/users/User.java`
-- `backend/src/main/java/com/example/users/UserResource.java`
-- `backend/src/main/docker/Dockerfile.jvm`
+---
 
-#### 2.1 Maven configuration (`pom.xml`)
+### 5) JWT signing keys (required)
 
-We use Quarkus 3.9.2 and Java 21. Dependencies:
+This project uses **SmallRye JWT’s build API (`Jwt.sign()`)**, which requires
+**real cryptographic keys**, not plain strings.
 
-- `quarkus-resteasy-reactive-jackson`: JSON REST API
-- `quarkus-hibernate-orm-panache`: simplified ORM layer
-- `quarkus-jdbc-postgresql`: Postgres driver
-
-**Reasoning:** These are the minimal Quarkus extensions to expose a REST API and persist data in Postgres.
-
-#### 2.2 Application configuration (`application.properties`)
+Using a configuration like:
 
 ```properties
-quarkus.datasource.db-kind=postgresql
-quarkus.datasource.username=postgres
-quarkus.datasource.password=postgres
-quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/userdb
-quarkus.hibernate-orm.database.generation=update
-quarkus.http.cors=true
+smallrye.jwt.sign.key=super-secret
 ```
 
-**Reasoning:**
-- `database.generation=update` auto-creates the table for development.
-- CORS is enabled so the Vue UI can call the API from another port.
+will cause runtime errors such as:
 
-#### 2.3 User entity (`User.java`)
-
-```java
-@Entity
-@Table(name = "users")
-public class User extends PanacheEntity {
-    @Column(nullable = false)
-    public String name;
-
-    @Column(nullable = false, unique = true)
-    public String email;
-}
+```
+SRJWT05028: Signing key can not be created from the loaded content
 ```
 
-**Reasoning:** Panache gives us a ready-made `id` and CRUD helpers. `email` is unique to avoid duplicates.
+To avoid this, the backend uses **RSA (RS256)** with:
 
-#### 2.4 REST resource (`UserResource.java`)
+* a **private key** to sign JWTs
+* a **public key** to verify JWTs
 
-Endpoints:
-
-- `GET /users` — list
-- `POST /users` — create
-- `PUT /users/{id}` — update
-- `DELETE /users/{id}` — delete
-
-**Reasoning:** These match standard CRUD operations and are easy for the Vue UI to call.
-
-#### 2.5 Backend Dockerfile
-
-We use the Quarkus JVM Dockerfile to run the built application in a container.
+This approach is safer and easier to scale.
 
 ---
 
-### 3) Database: PostgreSQL container
+### 6) Generating RSA `.pem` keys
 
-`docker-compose.yml` defines a Postgres service:
+Run the following commands:
 
-```yaml
-postgres:
-  image: postgres:16
-  environment:
-    POSTGRES_DB: userdb
-    POSTGRES_USER: postgres
-    POSTGRES_PASSWORD: postgres
+```bash
+# Generate a 2048-bit RSA private key (PKCS8)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out privateKey.pem
+
+# Extract the public key
+openssl pkey -in privateKey.pem -pubout -out publicKey.pem
 ```
 
-**Reasoning:** Docker ensures the database is reproducible with no manual install.
+Resulting files:
+
+* `privateKey.pem` — used to sign JWTs
+* `publicKey.pem` — used to verify JWTs
 
 ---
 
-### 4) Frontend: Vue 3 + Vite CRUD UI
+### 7) Key placement (local development)
 
-**Key files created:**
-
-- `frontend/package.json`
-- `frontend/vite.config.js`
-- `frontend/index.html`
-- `frontend/src/main.js`
-- `frontend/src/App.vue`
-
-#### 4.1 Dependencies
-
-- `vue` — UI framework
-- `axios` — HTTP client
-- `vite` — development/build tooling
-
-**Reasoning:** This is a lightweight, modern Vue stack with a fast dev server.
-
-#### 4.2 UI and CRUD logic (`App.vue`)
-
-- Form for create/update
-- Table for list
-- Buttons for edit/delete
-- Calls the Quarkus API using Axios
-
-Environment variable:
+Place the keys on the Quarkus classpath:
 
 ```
-VITE_API_BASE_URL=http://localhost:8080
+backend/src/main/resources/jwt/privateKey.pem
+backend/src/main/resources/jwt/publicKey.pem
 ```
 
-**Reasoning:** This makes the API base URL configurable without changing code.
+> Do not commit `privateKey.pem` in real production projects.
+> Use Docker or Kubernetes secrets instead.
+
+---
+
+### 8) Key configuration (backend)
+
+`backend/src/main/resources/application.properties` includes:
+
+```properties
+mp.jwt.verify.issuer=quarkus-crud
+
+# Sign JWTs
+smallrye.jwt.sign.key.location=jwt/privateKey.pem
+
+# Verify JWTs
+mp.jwt.verify.publickey.location=jwt/publicKey.pem
+
+# Explicit algorithm
+smallrye.jwt.new-token.signature-algorithm=RS256
+mp.jwt.verify.publickey.algorithm=RS256
+```
+
+**Why this matters:**
+The backend can now reliably sign and verify tokens without runtime failures.
+
+---
+
+## Frontend Walkthrough (Vue)
+
+### 1) Router + menu
+
+Vue Router defines the main pages:
+
+* `/login` — login screen
+* `/profile` — profile view
+* `/search` — user search (all roles)
+* `/users` — user management (admin only)
+
+Route guards redirect users who are not authenticated or do not have the right role.
+
+### 2) Auth state + API calls
+
+The frontend stores the JWT in `localStorage` and attaches it to every request:
+
+```js
+Authorization: Bearer <token>
+```
+
+This happens in a centralized Axios instance, so all pages inherit secure requests.
+
+### 3) Manage Users (Admin)
+
+Admins can:
+
+* Create users
+* Update name/email/username
+* Reset passwords
+* Change roles
+* Block/reactivate accounts
+* Delete users
+
+### 4) Search + Profile (All roles)
+
+Regular users can:
+
+* Search by name/email
+* View their own profile details
+
+They **cannot** access admin endpoints (front-end menu hides them and backend blocks them).
 
 ---
 
@@ -159,12 +246,12 @@ VITE_API_BASE_URL=http://localhost:8080
 
 ### Prerequisites
 
-- Java 21
-- Maven 3.9+
-- Node.js 18+ (Vite 5 requires Node 18+)
-- Docker + Docker Compose
+* Java 21
+* Maven 3.9+
+* Node.js 18+
+* Docker + Docker Compose
 
-### 1) Start Postgres and build/run backend
+### 1) Start Postgres + backend
 
 ```bash
 cd backend
@@ -173,7 +260,12 @@ cd ..
 docker-compose up --build
 ```
 
-The backend will be available at: `http://localhost:8080`
+Backend: `http://localhost:8080`
+
+Postgres port mapping is **5433:5432**:
+
+* Use `localhost:5433` when connecting from your host machine.
+* Use `postgres:5432` from containers on the same Docker network.
 
 ### 2) Start the Vue frontend
 
@@ -183,98 +275,74 @@ npm install
 npm run dev
 ```
 
-Open: `http://localhost:5173`
+Frontend: `http://localhost:5173`
 
----
-
-## API Reference
-
-| Method | Endpoint        | Description        |
-|-------:|------------------|--------------------|
-| GET    | `/users`         | List all users     |
-| POST   | `/users`         | Create a user      |
-| PUT    | `/users/{id}`    | Update a user      |
-| DELETE | `/users/{id}`    | Delete a user      |
-
----
-
-## Vue Frontend Walkthrough
-
-This UI is a single Vue component (`frontend/src/App.vue`) that manages the CRUD lifecycle:
-
-- **State:** The component stores the user list, the form fields, and any error messages.
-- **Lifecycle:** When the component mounts, it calls `fetchUsers()` to load data from the API.
-- **Form behavior:**
-  - If no `editingId` is set, the form submits a `POST /users` to create a new record.
-  - If `editingId` is set, the form submits a `PUT /users/{id}` to update the selected record.
-- **Table actions:**
-  - **Edit** fills the form with the selected user and sets `editingId`.
-  - **Delete** calls `DELETE /users/{id}` and refreshes the list afterward.
-- **API wiring:** Axios uses `VITE_API_BASE_URL` so the UI can point to different backends without changing code.
-
-If you are new to Vue, the key idea is that **template markup binds to reactive state**. When the state changes (like `users` updating after a fetch), Vue automatically re-renders the DOM.
-
----
-
-## cURL Examples (macOS-friendly)
-
-Replace `localhost:8080` if your backend runs elsewhere.
+If your backend runs on a different host/port, set:
 
 ```bash
-# List users
-curl -s http://localhost:8080/users
+export VITE_API_BASE_URL="http://localhost:8080"
+```
 
-# Create a user
-curl -s -X POST http://localhost:8080/users \
+---
+
+## API Reference (JWT Required)
+
+### Auth
+
+| Method | Endpoint      | Description           |
+| -----: | ------------- | --------------------- |
+|   POST | `/auth/login` | Login and receive JWT |
+
+### Users (Admin-only)
+
+| Method | Endpoint      | Description    |
+| -----: | ------------- | -------------- |
+|    GET | `/users`      | List all users |
+|   POST | `/users`      | Create user    |
+|    PUT | `/users/{id}` | Update user    |
+| DELETE | `/users/{id}` | Delete user    |
+
+### Users (All roles)
+
+| Method | Endpoint           | Description       |
+| -----: | ------------------ | ----------------- |
+|    GET | `/users/me`        | View your profile |
+|    GET | `/users/search?q=` | Search users      |
+
+---
+
+## cURL Examples
+
+### 1) Login
+
+```bash
+curl -s -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"name":"Ada Lovelace","email":"ada@example.com"}'
+  -d '{"username":"admin","password":"admin"}'
+```
 
-# Update a user (replace 1 with an existing id)
-curl -s -X PUT http://localhost:8080/users/1 \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Ada Byron","email":"ada.byron@example.com"}'
+```bash
+export TOKEN="paste-jwt-here"
+```
 
-# Delete a user (replace 1 with an existing id)
-curl -s -X DELETE http://localhost:8080/users/1
+### 2) Admin: List users
+
+```bash
+curl -s http://localhost:8080/users \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
 ## Troubleshooting
 
-**`npm install` fails with `SyntaxError: Unexpected token {` from `esbuild`**
+**Login fails**
 
-This usually means your Node.js version is too old to parse modern JavaScript syntax used by `esbuild` and Vite 5. Install Node.js 18+ and try again:
+* Ensure `.pem` files exist and are readable
+* Restart backend after changing keys
+* Confirm issuer matches `quarkus-crud`
 
-```bash
-node -v
-# If below 18, update with nvm (recommended):
-# nvm install 18
-# nvm use 18
-```
+**403 Forbidden**
 
-**`npm run dev` fails with `Cannot find module '@rollup/rollup-darwin-arm64'`**
-
-This is an npm optional dependency issue on macOS ARM (see npm CLI issue #4828). The fastest fix is to clear the install and reinstall:
-
-```bash
-rm -rf node_modules package-lock.json
-npm install
-```
-
-If you previously ran `npm audit fix --force`, it may have bumped Vite and Rollup to a newer major version. Prefer `npm audit fix` without `--force` to avoid unexpected breaking changes.
-
----
-
-## What Was Configured (and Why)
-
-- **CORS enabled in Quarkus**: Allows the Vue app (port 5173) to call the API (port 8080).
-- **Hibernate `update` strategy**: Automatically creates/updates the DB table during development.
-- **Dockerized Postgres**: Ensures consistent local development without manual DB setup.
-
----
-
-## Notes
-
-- This project is experimental and minimal by design.
-- For production, use migrations (e.g., Flyway), environment-based configs, and secure credentials.
+* Confirm the user role
+* Confirm JWT is being sent correctly
