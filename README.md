@@ -169,6 +169,10 @@ docker-compose up --build
 
 Backend: `http://localhost:8080`
 
+Postgres port mapping is **5433:5432**:
+- Use `localhost:5433` when connecting from your host machine (DBeaver, psql, local backend).
+- Use `postgres:5432` from containers on the same Docker network (the Quarkus container).
+
 ### 2) Start the Vue frontend
 
 ```bash

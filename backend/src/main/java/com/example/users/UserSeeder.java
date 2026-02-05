@@ -20,6 +20,16 @@ public class UserSeeder {
             admin.role = "admin";
             admin.active = true;
             admin.persist();
+        } else {
+            if (admin.name == null || admin.name.isBlank()) {
+                admin.name = "Administrator";
+            }
+            if (admin.email == null || admin.email.isBlank()) {
+                admin.email = "admin@example.com";
+            }
+            admin.role = "admin";
+            admin.active = true;
+            admin.passwordHash = PasswordUtils.hash("admin");
         }
 
         java.util.List<User> users = User.listAll();
