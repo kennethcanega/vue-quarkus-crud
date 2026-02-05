@@ -251,6 +251,7 @@ Common causes:
 
 What changed in backend:
 - User creation now handles Keycloak `409 Conflict` by resolving the existing Keycloak user id and continuing local sync.
+- User-id resolution now retries briefly (to handle eventual consistency right after create).
 - Role assignment is best-effort (create/update do not fail hard if role mapping fails).
 
 Recommended Keycloak service account roles:
@@ -259,7 +260,8 @@ Recommended Keycloak service account roles:
 - `view-realm`
 
 
-When `POST /users` returns 502, check backend logs for `Keycloak operation failed [...]` entries. These now include HTTP status and response body from Keycloak admin/token endpoints to speed up diagnosis.
+When `POST /users` returns 502, check backend logs for `Keycloak operation failed [...]` entries. These include HTTP status and response body from Keycloak admin/token endpoints to speed up diagnosis.
+If you see `createUser could not resolve userId`, the backend created/conflicted user in Keycloak but could not immediately resolve id; it now retries lookup several times before failing.
 
 
 ---

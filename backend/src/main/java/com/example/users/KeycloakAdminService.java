@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,16 +73,17 @@ public class KeycloakAdminService {
         if (response.statusCode() == 201 || response.statusCode() == 204) {
             userId = extractCreatedUserId(response);
             if (userId == null) {
-                userId = findUserIdByUsername(command.username(), adminToken);
+                userId = findUserIdByUsernameWithRetry(command.username(), adminToken);
             }
         } else if (response.statusCode() == 409) {
-            userId = findUserIdByUsername(command.username(), adminToken);
+            userId = findUserIdByUsernameWithRetry(command.username(), adminToken);
         } else {
             logFailure("createUser", response);
             return null;
         }
         if (userId == null) {
-            LOGGER.warning("Keycloak createUser could not resolve userId for username=" + command.username());
+            LOGGER.warning("Keycloak createUser could not resolve userId for username=" + command.username()
+                    + ", createResponse=" + summarizeResponse(response));
             return null;
         }
 
@@ -215,15 +217,44 @@ public class KeycloakAdminService {
     }
 
     private String findUserIdByUsername(String username, String adminToken) {
-        HttpResponse<String> response = sendJson("GET", adminUsersEndpoint() + "?username=" + encode(username) + "&exact=true", adminToken, null);
-        if (response == null || response.statusCode() >= 300) {
-            logFailure("findUserIdByUsername", response);
+        HttpResponse<String> exactResponse = sendJson(
+                "GET",
+                adminUsersEndpoint() + "?username=" + encode(username) + "&exact=true",
+                adminToken,
+                null);
+        if (exactResponse == null || exactResponse.statusCode() >= 300) {
+            logFailure("findUserIdByUsername(exact)", exactResponse);
             return null;
         }
         try {
-            JsonNode users = objectMapper.readTree(response.body());
+            JsonNode exactUsers = objectMapper.readTree(exactResponse.body());
+            if (exactUsers.isArray() && !exactUsers.isEmpty()) {
+                return exactUsers.get(0).path("id").asText(null);
+            }
+        } catch (IOException exception) {
+            return null;
+        }
+
+        HttpResponse<String> fuzzyResponse = sendJson(
+                "GET",
+                adminUsersEndpoint() + "?username=" + encode(username),
+                adminToken,
+                null);
+        if (fuzzyResponse == null || fuzzyResponse.statusCode() >= 300) {
+            logFailure("findUserIdByUsername(fuzzy)", fuzzyResponse);
+            return null;
+        }
+
+        try {
+            JsonNode users = objectMapper.readTree(fuzzyResponse.body());
             if (!users.isArray() || users.isEmpty()) {
                 return null;
+            }
+            for (JsonNode user : users) {
+                String candidate = user.path("username").asText("");
+                if (username.equalsIgnoreCase(candidate)) {
+                    return user.path("id").asText(null);
+                }
             }
             return users.get(0).path("id").asText(null);
         } catch (IOException exception) {

@@ -259,7 +259,8 @@ Required service account roles (realm-management):
 - `view-realm`
 
 
-When `POST /users` returns 502, check backend logs for `Keycloak operation failed [...]` entries. These now include HTTP status and response body from Keycloak admin/token endpoints to speed up diagnosis.
+When `POST /users` returns 502, check backend logs for `Keycloak operation failed [...]` entries. These include HTTP status and response body from Keycloak admin/token endpoints to speed up diagnosis.
+If you see `createUser could not resolve userId`, the backend created/conflicted user in Keycloak but could not immediately resolve id; it now retries lookup several times before failing.
 
 
 ---
