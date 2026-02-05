@@ -33,9 +33,8 @@ public class UserResource {
     @GET
     @RolesAllowed("admin")
     public List<UserResponse> list() {
-        return User.findAll()
-                .list()
-                .stream()
+        List<User> users = User.listAll();
+        return users.stream()
                 .map(UserResponse::from)
                 .collect(Collectors.toList());
     }
@@ -48,9 +47,9 @@ public class UserResource {
         if (term.isBlank()) {
             return List.of();
         }
-        return User.find("lower(name) like ?1 or lower(email) like ?1", "%" + term.toLowerCase() + "%")
-                .list()
-                .stream()
+        List<User> users = User.find("lower(name) like ?1 or lower(email) like ?1", "%" + term.toLowerCase() + "%")
+                .list();
+        return users.stream()
                 .map(user -> new UserSummary(user.id, user.name, user.email))
                 .collect(Collectors.toList());
     }
