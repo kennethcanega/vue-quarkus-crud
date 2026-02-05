@@ -1,10 +1,11 @@
 package com.example.users;
 
+import io.quarkus.security.Authenticated;
 import io.quarkus.security.identity.SecurityIdentity;
-import jakarta.annotation.security.RolesAllowed;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
@@ -23,6 +24,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 @Path("/users")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Authenticated
 public class UserResource {
 
     private final SecurityIdentity identity;
@@ -36,8 +38,8 @@ public class UserResource {
     }
 
     @GET
-    @RolesAllowed("admin")
     public List<UserResponse> list() {
+        assertAdmin();
         List<User> users = User.listAll();
         return users.stream()
                 .map(UserResponse::from)
@@ -46,8 +48,8 @@ public class UserResource {
 
     @GET
     @Path("/search")
-    @RolesAllowed({"admin", "user"})
     public List<UserSummary> search(@QueryParam("q") String query) {
+        requireCurrentUser();
         String term = Optional.ofNullable(query).orElse("").trim();
         if (term.isBlank()) {
             return List.of();
@@ -61,23 +63,14 @@ public class UserResource {
 
     @GET
     @Path("/me")
-    @RolesAllowed({"admin", "user"})
     public UserResponse profile() {
-        String username = Optional.ofNullable(jsonWebToken.getClaim("preferred_username"))
-                .map(Object::toString)
-                .filter(value -> !value.isBlank())
-                .orElse(identity.getPrincipal().getName());
-        User user = User.findByUsername(username);
-        if (user == null) {
-            throw new NotFoundException();
-        }
-        return UserResponse.from(user);
+        return UserResponse.from(requireCurrentUser());
     }
 
     @POST
-    @RolesAllowed("admin")
     @Transactional
     public Response create(CreateUserRequest request) {
+        assertAdmin();
         if (request == null
                 || isBlank(request.username())
                 || isBlank(request.password())
@@ -119,9 +112,9 @@ public class UserResource {
 
     @PUT
     @Path("/{id}")
-    @RolesAllowed("admin")
     @Transactional
     public Response update(@PathParam("id") Long id, UpdateUserRequest updated) {
+        assertAdmin();
         User user = User.findById(id);
         if (user == null) {
             throw new NotFoundException();
@@ -160,9 +153,9 @@ public class UserResource {
 
     @DELETE
     @Path("/{id}")
-    @RolesAllowed("admin")
     @Transactional
     public Response delete(@PathParam("id") Long id) {
+        assertAdmin();
         User user = User.findById(id);
         if (user == null) {
             throw new NotFoundException();
@@ -177,6 +170,25 @@ public class UserResource {
 
         user.delete();
         return Response.noContent().build();
+    }
+
+    private User requireCurrentUser() {
+        String username = Optional.ofNullable(jsonWebToken.getClaim("preferred_username"))
+                .map(Object::toString)
+                .filter(value -> !value.isBlank())
+                .orElse(identity.getPrincipal().getName());
+        User user = User.findByUsername(username);
+        if (user == null || !Boolean.TRUE.equals(user.active)) {
+            throw new ForbiddenException();
+        }
+        return user;
+    }
+
+    private void assertAdmin() {
+        User currentUser = requireCurrentUser();
+        if (!"admin".equalsIgnoreCase(Optional.ofNullable(currentUser.role).orElse(""))) {
+            throw new ForbiddenException();
+        }
     }
 
     private boolean isBlank(String value) {

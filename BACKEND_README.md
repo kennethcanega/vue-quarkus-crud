@@ -24,7 +24,7 @@ Now Keycloak issues tokens, and Quarkus focuses on:
 
 1. brokering auth/refresh/logout flows,
 2. validating incoming Bearer tokens,
-3. enforcing roles with `@RolesAllowed`.
+3. enforcing permissions using local user profile role/state (`admin`/`user`, `active`) after token authentication.
 
 ---
 
@@ -51,7 +51,7 @@ Purpose of each:
 
 - **auth-server-url**: tells Quarkus where token metadata and key material come from.
 - **client-id/client-secret**: allows backend to securely call token/logout endpoints.
-- **role-claim-path**: maps Keycloak realm roles to `@RolesAllowed("admin")` / `@RolesAllowed("user")`.
+- **role-claim-path**: keeps token role claims available when needed for integrations and diagnostics.
 
 Additional backend auth broker properties:
 
@@ -197,6 +197,26 @@ Compose note:
 - Set `KEYCLOAK_CLIENT_SECRET` in shell or `.env` before `docker compose up --build`.
 
 
+
+
+## 3.3) Troubleshooting login success but API 403
+
+Symptom:
+- `/auth/login` succeeds
+- `/users`, `/users/me`, `/users/search` return 403
+
+Meaning:
+- Token is valid, but local user authorization checks failed.
+
+Checks:
+1. Local `users` row exists for token username (`preferred_username`).
+2. Local `active` is true.
+3. Local `role` is `admin` for admin CRUD endpoints.
+
+Reasoning:
+- Keycloak authenticates identity.
+- Backend then authorizes using local profile metadata to keep business access aligned with app-managed roles.
+
 ---
 
 ## 4) Auth flow in code (`AuthResource`)
@@ -234,10 +254,10 @@ Manage-users operations are synchronized to Keycloak via `KeycloakAdminService`:
 - delete: removes Keycloak user then deletes local row
 
 
-Security remains annotation-based:
+Authorization is profile-based after authentication:
 
-- Admin-only: `@RolesAllowed("admin")`
-- Authenticated users: `@RolesAllowed({"admin", "user"})`
+- `@Authenticated` ensures only valid Keycloak tokens can access `/users/*`.
+- Local `users` table role/state (`admin`/`user`, `active`) determines operation permission.
 
 Profile resolution for `/users/me`:
 

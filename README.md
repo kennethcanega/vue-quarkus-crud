@@ -18,7 +18,7 @@ You can log in, view your profile, search users, and (if you are an admin) manag
 * **Keycloak token login** via `/auth/login` + refresh (`/auth/refresh`) + logout (`/auth/logout`)
 * **Roles:** `admin` and `user` (from Keycloak `realm_access.roles`)
 * **Menu + routing** in Vue hides or shows features based on role
-* **Backend enforcement** blocks non-admin access to admin endpoints using `@RolesAllowed`
+* **Backend enforcement** blocks non-admin access to admin endpoints using local profile role checks (`admin`/`user`) after token authentication
 * **Manage users provisions Keycloak users** so newly created users can immediately log in via app login
 
 ### Default Account
@@ -49,7 +49,7 @@ Vue (frontend) --> Quarkus API (backend) --> PostgreSQL
 * Vue authenticates against backend `/auth/*` endpoints.
 * Quarkus brokers credential/token exchanges with Keycloak OIDC endpoints.
 * Access tokens are stored by the frontend in `localStorage`; refresh tokens are stored as HTTP-only cookies.
-* Quarkus validates Bearer tokens using OIDC configuration and enforces roles with `@RolesAllowed`.
+* Quarkus validates Bearer tokens using OIDC configuration. Endpoint authorization is then enforced against the local user profile role (`admin`/`user`) to keep access decisions aligned with app data.
 * User credentials (passwords) are stored only in Keycloak; backend DB stores app profile/role metadata only.
 
 ---
@@ -90,7 +90,7 @@ Navigation:
 
 ### 4) Create realm roles `admin` and `user`
 
-**Purpose:** Backend authorization (`@RolesAllowed`) checks these exact role names.
+**Purpose:** These role names are used by backend local profile authorization checks.
 
 Navigation:
 1. Left menu → **Realm roles**.
@@ -209,6 +209,18 @@ KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-change-me}
 
 So you can also place the secret in a local `.env` file (never commit real secrets).
 
+
+
+
+### 11) Troubleshooting: login works but `/users*` returns 403
+
+If login succeeds but calls like `/users`, `/users/me`, or `/users/search` return 403:
+
+1. Ensure the logged-in username exists in local app DB (`users` table).
+2. Ensure local user is active (`active=true`).
+3. For admin endpoints (`/users` CRUD), ensure local role is `admin`.
+
+Why: authentication is from Keycloak token, while endpoint permission checks are resolved against local user profile role/state.
 
 ---
 
