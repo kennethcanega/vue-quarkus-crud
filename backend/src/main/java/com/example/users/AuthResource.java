@@ -71,13 +71,8 @@ public class AuthResource {
             return Response.status(Response.Status.UNAUTHORIZED).build();
         }
 
-        String username = extractUsername(tokenResponse.accessToken());
-        if (isBlank(username)) {
-            return Response.status(Response.Status.UNAUTHORIZED).build();
-        }
-
-        User user = User.findByUsername(username);
-        if (user == null || !user.active) {
+        User user = resolveUserFromAccessToken(tokenResponse.accessToken());
+        if (user == null || !Boolean.TRUE.equals(user.active)) {
             return Response.status(Response.Status.UNAUTHORIZED).build();
         }
 
@@ -111,9 +106,8 @@ public class AuthResource {
                     .build();
         }
 
-        String username = extractUsername(tokenResponse.accessToken());
-        User user = User.findByUsername(username);
-        if (user == null || !user.active) {
+        User user = resolveUserFromAccessToken(tokenResponse.accessToken());
+        if (user == null || !Boolean.TRUE.equals(user.active)) {
             return Response.status(Response.Status.UNAUTHORIZED)
                     .cookie(expiredRefreshCookie())
                     .build();
@@ -239,5 +233,8 @@ public class AuthResource {
     }
 
     private record TokenResponse(String accessToken, String refreshToken, int refreshExpiresIn) {
+    }
+
+    private record TokenClaims(String preferredUsername, String subject) {
     }
 }

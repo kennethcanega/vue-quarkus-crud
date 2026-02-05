@@ -29,4 +29,8 @@ public class User extends PanacheEntity {
     public static User findByUsername(String username) {
         return find("username", username).firstResult();
     }
+
+    public static User findByKeycloakUserId(String keycloakUserId) {
+        return find("keycloakUserId", keycloakUserId).firstResult();
+    }
 }

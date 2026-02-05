@@ -173,11 +173,32 @@ public class UserResource {
     }
 
     private User requireCurrentUser() {
-        String username = Optional.ofNullable(jsonWebToken.getClaim("preferred_username"))
+        String preferredUsername = Optional.ofNullable(jsonWebToken.getClaim("preferred_username"))
                 .map(Object::toString)
-                .filter(value -> !value.isBlank())
-                .orElse(identity.getPrincipal().getName());
-        User user = User.findByUsername(username);
+                .orElse("")
+                .trim();
+        String subject = Optional.ofNullable(jsonWebToken.getClaim("sub"))
+                .map(Object::toString)
+                .orElse("")
+                .trim();
+
+        User user = null;
+        if (!preferredUsername.isBlank()) {
+            user = User.findByUsername(preferredUsername);
+        }
+        if (user == null && !subject.isBlank()) {
+            user = User.findByKeycloakUserId(subject);
+        }
+        if (user == null) {
+            String principalName = Optional.ofNullable(identity.getPrincipal())
+                    .map(principal -> principal.getName())
+                    .orElse("")
+                    .trim();
+            if (!principalName.isBlank()) {
+                user = User.findByUsername(principalName);
+            }
+        }
+
         if (user == null || !Boolean.TRUE.equals(user.active)) {
             throw new ForbiddenException();
         }

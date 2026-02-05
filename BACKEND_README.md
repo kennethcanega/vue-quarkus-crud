@@ -217,6 +217,29 @@ Reasoning:
 - Keycloak authenticates identity.
 - Backend then authorizes using local profile metadata to keep business access aligned with app-managed roles.
 
+
+
+## 3.4) Troubleshooting create-user 201 but login 401
+
+Symptom:
+- Admin creates user successfully (`POST /users` -> 201).
+- New user login returns 401 from `/auth/login`.
+
+Common cause:
+- Access token claims may not include `preferred_username` depending on client scope mapping.
+- If backend only used username claim, local lookup could fail despite valid Keycloak credentials.
+
+Implemented behavior:
+- Backend resolves local user by `preferred_username` first.
+- If missing/unmatched, backend falls back to `sub` claim and matches local `keycloakUserId`.
+
+Verification steps:
+1. Keycloak user exists and has a non-temporary password.
+2. Local DB row exists with correct `username` and `keycloak_user_id`.
+3. Local `active=true`.
+4. Stored `keycloak_user_id` equals Keycloak user UUID exactly.
+
+
 ---
 
 ## 4) Auth flow in code (`AuthResource`)
@@ -225,7 +248,7 @@ Reasoning:
 
 - `POST /auth/login`
   - exchanges username/password against Keycloak token endpoint (`grant_type=password`)
-  - validates that local app user exists and is active
+  - validates that local app user exists and is active (`preferred_username` lookup with `sub`/`keycloakUserId` fallback)
   - returns access token + app user payload
   - sets HTTP-only refresh cookie
 

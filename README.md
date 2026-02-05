@@ -51,6 +51,7 @@ Vue (frontend) --> Quarkus API (backend) --> PostgreSQL
 * Access tokens are stored by the frontend in `localStorage`; refresh tokens are stored as HTTP-only cookies.
 * Quarkus validates Bearer tokens using OIDC configuration. Endpoint authorization is then enforced against the local user profile role (`admin`/`user`) to keep access decisions aligned with app data.
 * User credentials (passwords) are stored only in Keycloak; backend DB stores app profile/role metadata only.
+* Backend maps token identity to local user by `preferred_username`, with `sub`→`keycloakUserId` fallback for reliability.
 
 ---
 
@@ -221,6 +222,23 @@ If login succeeds but calls like `/users`, `/users/me`, or `/users/search` retur
 3. For admin endpoints (`/users` CRUD), ensure local role is `admin`.
 
 Why: authentication is from Keycloak token, while endpoint permission checks are resolved against local user profile role/state.
+
+
+
+### 12) Troubleshooting: user creation succeeds (201) but new user login returns 401
+
+If `POST /users` returns 201 but login for that new user returns 401:
+
+1. Confirm user exists in Keycloak (**Users** list) and has a password set under **Credentials**.
+2. Confirm local `users` table row exists and has `keycloak_user_id` populated.
+3. Confirm user is active in local DB (`active=true`).
+
+Why this can happen:
+- Keycloak token may not always carry `preferred_username` in some client scope setups.
+- Backend now resolves local user by `preferred_username` first, then falls back to token `sub` matched against local `keycloakUserId`.
+
+If it still fails, verify the `keycloak_user_id` stored locally matches Keycloak user ID exactly.
+
 
 ---
 
