@@ -58,6 +58,8 @@ public class KeycloakAdminService {
         payload.put("email", command.email());
         payload.put("firstName", command.firstName());
         payload.put("enabled", Optional.ofNullable(command.active()).orElse(true));
+        payload.put("emailVerified", true);
+        payload.put("requiredActions", List.of());
         payload.put("credentials", List.of(Map.of(
                 "type", "password",
                 "value", command.password(),
@@ -87,6 +89,10 @@ public class KeycloakAdminService {
             return null;
         }
 
+        if (!clearRequiredActions(userId, adminToken)) {
+            LOGGER.warning("Keycloak user created but required-actions cleanup failed for username=" + command.username());
+        }
+
         if (!assignRealmRole(userId, command.role(), adminToken)) {
             LOGGER.warning("Keycloak user created but role assignment failed for username=" + command.username());
         }
@@ -104,6 +110,8 @@ public class KeycloakAdminService {
         payload.put("email", command.email());
         payload.put("firstName", command.firstName());
         payload.put("enabled", Optional.ofNullable(command.active()).orElse(true));
+        payload.put("emailVerified", true);
+        payload.put("requiredActions", List.of());
 
         HttpResponse<String> response = sendJson("PUT", adminUsersEndpoint() + "/" + keycloakUserId, adminToken, payload);
         if (response == null || response.statusCode() >= 300) {
@@ -114,6 +122,10 @@ public class KeycloakAdminService {
         if (!isBlank(command.password()) && !setPassword(keycloakUserId, command.password(), adminToken)) {
             LOGGER.warning("Keycloak reset-password failed for userId=" + keycloakUserId);
             return false;
+        }
+
+        if (!clearRequiredActions(keycloakUserId, adminToken)) {
+            LOGGER.warning("Keycloak required-actions cleanup failed for userId=" + keycloakUserId);
         }
 
         if (!assignRealmRole(keycloakUserId, command.role(), adminToken)) {
@@ -130,6 +142,19 @@ public class KeycloakAdminService {
         HttpResponse<String> response = sendJson("DELETE", adminUsersEndpoint() + "/" + keycloakUserId, adminToken, null);
         if (response == null || response.statusCode() >= 300) {
             logFailure("deleteUser", response);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean clearRequiredActions(String userId, String adminToken) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("requiredActions", List.of());
+        payload.put("emailVerified", true);
+
+        HttpResponse<String> response = sendJson("PUT", adminUsersEndpoint() + "/" + userId, adminToken, payload);
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("clearRequiredActions", response);
             return false;
         }
         return true;

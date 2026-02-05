@@ -264,6 +264,27 @@ When `POST /users` returns 502, check backend logs for `Keycloak operation faile
 If you see `createUser could not resolve userId`, the backend created/conflicted user in Keycloak but could not immediately resolve id; it now retries lookup several times before failing.
 
 
+
+
+### 14) Troubleshooting: `resolve_required_actions` / "Account is not fully set up"
+
+If Keycloak logs show:
+
+```
+error="resolve_required_actions", reason="Account is not fully set up"
+```
+
+it means Keycloak still has pending required actions for that user (for example `VERIFY_EMAIL` or `UPDATE_PROFILE`) and password grant login is blocked until actions are completed.
+
+Current backend behavior:
+- During user create/update sync, backend now explicitly clears `requiredActions` and marks `emailVerified=true` for managed users.
+
+What to check in Keycloak for affected users:
+1. Users → select user → **Details** tab → **Required user actions** should be empty.
+2. If not empty, clear required actions and save.
+3. Ensure user has a non-temporary password in **Credentials**.
+
+
 ---
 
 ## How To Run (Step-by-Step)
