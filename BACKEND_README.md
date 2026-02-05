@@ -6,7 +6,7 @@ This guide explains the backend for developers new to Quarkus, with emphasis on 
 
 ## 1) Libraries used (`backend/pom.xml`) and why
 
-- **`quarkus-resteasy-reactive-jackson`**
+- **`quarkus-rest-jackson`**
   - REST APIs + JSON serialization/deserialization.
 - **`quarkus-hibernate-orm-panache`**
   - ORM + active-record style persistence for entities.

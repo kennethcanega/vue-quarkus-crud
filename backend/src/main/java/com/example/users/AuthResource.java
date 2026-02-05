@@ -166,11 +166,31 @@ public class AuthResource {
         }
     }
 
-    private String extractUsername(String accessToken) {
+    private User resolveUserFromAccessToken(String accessToken) {
+        TokenClaims claims = extractClaims(accessToken);
+        if (claims == null) {
+            return null;
+        }
+
+        if (!isBlank(claims.preferredUsername())) {
+            User byUsername = User.findByUsername(claims.preferredUsername());
+            if (byUsername != null) {
+                return byUsername;
+            }
+        }
+
+        if (!isBlank(claims.subject())) {
+            return User.findByKeycloakUserId(claims.subject());
+        }
+
+        return null;
+    }
+
+    private TokenClaims extractClaims(String accessToken) {
         if (isBlank(accessToken)) {
             return null;
         }
-        String[] tokenParts = accessToken.split("\\.");
+        String[] tokenParts = accessToken.split("\.");
         if (tokenParts.length < 2) {
             return null;
         }
@@ -178,10 +198,8 @@ public class AuthResource {
             String payload = new String(Base64.getUrlDecoder().decode(tokenParts[1]), StandardCharsets.UTF_8);
             JsonNode json = objectMapper.readTree(payload);
             String preferredUsername = json.path("preferred_username").asText("").trim();
-            if (!preferredUsername.isEmpty()) {
-                return preferredUsername;
-            }
-            return json.path("sub").asText("").trim();
+            String subject = json.path("sub").asText("").trim();
+            return new TokenClaims(preferredUsername, subject);
         } catch (IllegalArgumentException | IOException exception) {
             return null;
         }
