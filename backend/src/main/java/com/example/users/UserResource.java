@@ -1,6 +1,7 @@
 package com.example.users;
 
 import io.quarkus.security.identity.SecurityIdentity;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
@@ -25,9 +26,11 @@ import java.util.stream.Collectors;
 public class UserResource {
 
     private final SecurityIdentity identity;
+    private final JsonWebToken jsonWebToken;
 
-    public UserResource(SecurityIdentity identity) {
+    public UserResource(SecurityIdentity identity, JsonWebToken jsonWebToken) {
         this.identity = identity;
+        this.jsonWebToken = jsonWebToken;
     }
 
     @GET
@@ -58,7 +61,11 @@ public class UserResource {
     @Path("/me")
     @RolesAllowed({"admin", "user"})
     public UserResponse profile() {
-        User user = User.findByUsername(identity.getPrincipal().getName());
+        String username = Optional.ofNullable(jsonWebToken.getClaim("preferred_username"))
+                .map(Object::toString)
+                .filter(value -> !value.isBlank())
+                .orElse(identity.getPrincipal().getName());
+        User user = User.findByUsername(username);
         if (user == null) {
             throw new NotFoundException();
         }
