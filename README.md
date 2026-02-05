@@ -58,7 +58,9 @@ Vue (frontend) --> Quarkus API (backend) --> PostgreSQL
 
 **Purpose:** Run an OIDC provider that issues and validates user tokens.
 
-Example (dev mode):
+This repository now includes Keycloak in `docker-compose.yml`, exposed at `http://localhost:8180` (admin/admin by default).
+
+If you prefer running it separately, you can still use:
 
 ```bash
 docker run --name quarkus-keycloak \
@@ -139,7 +141,7 @@ export AUTH_REFRESH_COOKIE_SECURE="false"
 * Node.js 18+
 * Docker + Docker Compose
 
-### 1) Start Postgres + backend
+### 1) Start Postgres + Keycloak + backend
 
 ```bash
 cd backend

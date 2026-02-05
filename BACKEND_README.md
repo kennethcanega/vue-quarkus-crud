@@ -72,6 +72,10 @@ These are used by `AuthResource` for direct token/logout HTTP calls.
 
 **Purpose:** Provide a standards-based identity server that issues signed access/refresh tokens.
 
+`docker-compose.yml` now includes a `keycloak` service (admin/admin, port `8180`).
+
+You can still run Keycloak manually if needed:
+
 ```bash
 docker run --name quarkus-keycloak \
   -p 8180:8080 \
