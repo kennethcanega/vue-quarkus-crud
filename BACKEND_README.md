@@ -98,11 +98,12 @@ Interpretation:
 ## CORS
 
 - `quarkus.http.cors=true`
-- `quarkus.http.cors.origins=*`
+- `quarkus.http.cors.origins=${CORS_ORIGINS:http://localhost:5173}`
 - `quarkus.http.cors.headers=...`
 - `quarkus.http.cors.methods=...`
+- `quarkus.http.cors.access-control-allow-credentials=true`
 
-This allows browser frontend calls from different origins during development.
+This allows browser frontend calls from different origins during development and supports credentialed refresh-cookie flows.
 
 ## JWT/security config
 
@@ -152,12 +153,43 @@ Authentication endpoint class (`/auth`).
 - `POST /auth/login` marked `@PermitAll`.
 - Validates request payload and credentials.
 - Rejects inactive users.
-- Creates JWT with:
+- Creates access JWT with:
   - issuer
   - subject = username
   - groups = user role
-  - expiration = 8 hours
-- Returns `LoginResponse(token, UserResponse)`.
+  - expiration from `auth.access-token.ttl-seconds` (default 300s).
+- Returns `LoginResponse(token, UserResponse)` and sets HTTP-only refresh cookie.
+- `POST /auth/refresh` rotates refresh token and returns fresh access JWT.
+- `POST /auth/logout` revokes refresh token(s) and expires refresh cookie.
+
+
+## `backend/src/main/java/com/example/users/RefreshToken.java`
+
+Refresh token persistence entity (`refresh_tokens` table).
+
+Fields include:
+
+- `user` relation
+- `tokenHash` (SHA-256 hash of refresh token value)
+- `expiresAt`, `createdAt`, `revokedAt`
+
+Rationale:
+
+- Plain refresh tokens are never stored directly in DB.
+- Revocation and expiration checks are server-side and stateful.
+
+## `backend/src/main/java/com/example/users/RefreshTokenService.java`
+
+Refresh token orchestration service.
+
+Capabilities:
+
+- issue new refresh token on login
+- validate refresh token
+- rotate refresh token on `/auth/refresh`
+- revoke one/all active refresh tokens (logout/login)
+
+This enables industry-standard session handling with short-lived access tokens and revocable long-lived refresh tokens.
 
 ## `backend/src/main/java/com/example/users/UserResource.java`
 
@@ -242,10 +274,11 @@ When frontend calls `POST /auth/login`:
 3. `User.findByUsername(...)` fetches user.
 4. `PasswordUtils.matches(...)` checks bcrypt hash.
 5. If user missing/inactive/wrong password → `401 Unauthorized`.
-6. Backend builds JWT (`iss`, `sub`, `groups`, expiry) and signs with private key.
-7. Response returns token + sanitized user payload.
+6. Backend builds access JWT (`iss`, `sub`, `groups`, expiry) and signs with private key.
+7. Backend issues refresh token, stores hash in DB, and sets HTTP-only cookie.
+8. Response returns access token + sanitized user payload.
 
-Frontend stores token and sends `Authorization: Bearer <token>` on later requests.
+Frontend stores access token and sends `Authorization: Bearer <token>` on later requests.
 
 ---
 
@@ -284,7 +317,23 @@ This means security checks happen before your business code runs.
 
 ---
 
-## 9) How to quickly understand this codebase as a new Quarkus dev
+## 9) Refresh + logout processing (step-by-step)
+
+When frontend calls `POST /auth/refresh`:
+
+1. Backend reads refresh cookie (`refresh_token`).
+2. Hashes cookie value and finds matching DB record.
+3. Rejects token if missing/revoked/expired/inactive user.
+4. Revokes old token and persists rotated replacement.
+5. Issues fresh access JWT and sets rotated refresh cookie.
+
+When frontend calls `POST /auth/logout`:
+
+1. Backend reads refresh cookie.
+2. Revokes associated refresh token(s).
+3. Returns `204` + expired cookie (`maxAge=0`).
+
+## 10) How to quickly understand this codebase as a new Quarkus dev
 
 Recommended order:
 
@@ -294,6 +343,7 @@ Recommended order:
 4. `User.java` + DTO records (data model and API contracts)
 5. `AuthResource.java` (login/token creation)
 6. `UserResource.java` (role-protected business APIs)
-7. `UserSeeder.java` (startup guarantees)
+7. `RefreshToken.java` + `RefreshTokenService.java` (session lifecycle)
+8. `UserSeeder.java` (startup guarantees)
 
 If you can trace how a JWT created in `AuthResource` becomes a `SecurityIdentity` used by `@RolesAllowed` in `UserResource`, you have mastered the central Quarkus security flow in this project.

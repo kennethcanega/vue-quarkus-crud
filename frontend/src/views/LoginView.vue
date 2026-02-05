@@ -1,7 +1,7 @@
 <template>
   <section class="card auth-card">
-    <h2>Login</h2>
-    <p class="muted">Default admin: <strong>admin</strong> / <strong>admin</strong></p>
+    <h2>Welcome back</h2>
+    <p class="muted">Sign in with your directory credentials. Default admin: <strong>admin/admin</strong>.</p>
     <form @submit.prevent="handleLogin">
       <div class="field">
         <label for="username">Username</label>
@@ -11,7 +11,9 @@
         <label for="password">Password</label>
         <input id="password" type="password" v-model="form.password" required autocomplete="current-password" />
       </div>
-      <button type="submit">Sign in</button>
+      <div class="actions">
+        <button type="submit">Sign in securely</button>
+      </div>
       <p v-if="errorMessage" class="status error">{{ errorMessage }}</p>
     </form>
   </section>
@@ -35,7 +37,14 @@ const handleLogin = async () => {
     await login(form.username, form.password);
     router.push('/profile');
   } catch (error) {
-    errorMessage.value = 'Invalid credentials or user is inactive.';
+    errorMessage.value = 'Invalid credentials or inactive account.';
   }
 };
 </script>
+
+<style scoped>
+.auth-card {
+  max-width: 440px;
+  margin: 2.5rem auto;
+}
+</style>

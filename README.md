@@ -14,7 +14,7 @@ You can log in, view your profile, search users, and (if you are an admin) manag
 
 ### Authentication + Authorization
 
-* **JWT login** (`/auth/login`)
+* **JWT login** (`/auth/login`) + refresh (`/auth/refresh`) + logout (`/auth/logout`)
 * **Roles:** `admin` and `user`
 * **Menu + routing** in Vue hides or shows features based on role
 * **Backend enforcement** blocks non-admin access to admin endpoints
@@ -42,8 +42,8 @@ You can log in, view your profile, search users, and (if you are an admin) manag
 Vue (frontend) --> Quarkus API (backend) --> PostgreSQL
 ```
 
-* Vue authenticates with `/auth/login` and stores a JWT in `localStorage`.
-* Axios sends the JWT in the `Authorization: Bearer <token>` header.
+* Vue authenticates with `/auth/login`, stores a short-lived access token in `localStorage`, and receives an HTTP-only refresh cookie.
+* Axios sends the JWT in the `Authorization: Bearer <token>` header and refreshes tokens via `/auth/refresh` on schedule / 401.
 * Quarkus verifies the token and enforces roles with `@RolesAllowed`.
 
 ---
@@ -64,18 +64,21 @@ This lets us enforce **both** login security and business logic in the same tabl
 
 ---
 
-### 2) JWT Login (`/auth/login`)
+### 2) Auth lifecycle (`/auth/login`, `/auth/refresh`, `/auth/logout`)
 
-The login endpoint:
+The auth endpoints now implement short-lived access tokens + refresh-token rotation:
 
-1. Verifies username/password.
-2. Rejects inactive users.
-3. Builds a JWT with:
+1. `POST /auth/login` verifies username/password and rejects inactive users.
+2. Backend returns access token in JSON and sets HTTP-only refresh cookie (`refresh_token`).
+3. `POST /auth/refresh` validates + rotates refresh token and returns a new access token.
+4. `POST /auth/logout` revokes refresh tokens and clears the refresh cookie.
+
+Access JWTs still include:
 
    * `sub` = username
    * `groups` = role
 
-The JWT is signed using **RSA (RS256)** with a private key.
+JWTs are signed using **RSA (RS256)** with a private key.
 
 > Plain text secrets are **not supported** when using `Jwt.sign()` in Quarkus.
 > The backend must use real cryptographic key material.
@@ -88,7 +91,7 @@ Quarkus uses annotations to enforce access:
 
 * `@RolesAllowed("admin")` for admin-only endpoints like `/users` CRUD
 * `@RolesAllowed({"admin", "user"})` for `/users/search` and `/users/me`
-* `@PermitAll` for `/auth/login`
+* `@PermitAll` for `/auth/login`, `/auth/refresh`, and `/auth/logout`
 
 This means **even curl/Postman users are blocked** unless they have a valid JWT with the right role.
 
@@ -212,13 +215,15 @@ Route guards redirect users who are not authenticated or do not have the right r
 
 ### 2) Auth state + API calls
 
-The frontend stores the JWT in `localStorage` and attaches it to every request:
+The frontend stores the access JWT in `localStorage` and attaches it to every request:
 
 ```js
 Authorization: Bearer <token>
 ```
 
 This happens in a centralized Axios instance, so all pages inherit secure requests.
+
+It also runs a configurable refresh scheduler (default every 5 seconds) and retries once on 401 by calling `/auth/refresh`.
 
 ### 3) Manage Users (Admin)
 
@@ -281,6 +286,16 @@ If your backend runs on a different host/port, set:
 
 ```bash
 export VITE_API_BASE_URL="http://localhost:8080"
+export VITE_AUTH_REFRESH_INTERVAL_MS="5000"
+```
+
+Backend token/session tuning can be configured with:
+
+```bash
+export AUTH_ACCESS_TOKEN_TTL_SECONDS="300"
+export AUTH_REFRESH_TOKEN_TTL_SECONDS="1209600"
+export AUTH_REFRESH_COOKIE_SECURE="false"
+export CORS_ORIGINS="http://localhost:5173"
 ```
 
 ---
@@ -291,7 +306,9 @@ export VITE_API_BASE_URL="http://localhost:8080"
 
 | Method | Endpoint      | Description           |
 | -----: | ------------- | --------------------- |
-|   POST | `/auth/login` | Login and receive JWT |
+|   POST | `/auth/login` | Login and receive access JWT + refresh cookie |
+|   POST | `/auth/refresh` | Rotate refresh token and receive fresh access JWT |
+|   POST | `/auth/logout` | Revoke refresh token(s) and clear refresh cookie |
 
 ### Users (Admin-only)
 

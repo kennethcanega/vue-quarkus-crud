@@ -1,9 +1,12 @@
 <template>
   <div class="app-shell">
     <header class="top-bar">
-      <div>
-        <h1>Team Directory</h1>
-        <p>Secure user management with role-based access.</p>
+      <div class="brand">
+        <div class="brand-mark">QD</div>
+        <div>
+          <h1>Quarkus Directory</h1>
+          <p>Professional user operations with secure role-based access.</p>
+        </div>
       </div>
       <div class="auth-actions" v-if="isAuthenticated">
         <span class="pill pill-neutral">{{ currentUser?.username }}</span>
@@ -13,8 +16,8 @@
 
     <nav v-if="isAuthenticated" class="menu">
       <RouterLink to="/profile">My Profile</RouterLink>
-      <RouterLink to="/search">Search</RouterLink>
-      <RouterLink v-if="isAdmin" to="/users">Manage Users</RouterLink>
+      <RouterLink to="/search">Directory Search</RouterLink>
+      <RouterLink v-if="isAdmin" to="/users">Administration</RouterLink>
     </nav>
 
     <main class="container">
@@ -26,81 +29,94 @@
 <script setup>
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { isAdmin, isAuthenticated, loadProfile, logout, state } from './services/auth';
+import { initializeAuth, isAdmin, isAuthenticated, logout, state } from './services/auth';
 
 const router = useRouter();
 const currentUser = computed(() => state.user);
 
-const handleLogout = () => {
-  logout();
+const handleLogout = async () => {
+  await logout();
   router.push('/login');
 };
 
 onMounted(async () => {
-  if (isAuthenticated.value && !state.user) {
-    await loadProfile();
-  }
+  await initializeAuth();
 });
 </script>
 
 <style scoped>
-:root {
-  color-scheme: light;
-}
-
-body {
-  margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
-  background: #f5f7fb;
-}
-
 .app-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: linear-gradient(180deg, #f4f7fc 0%, #edf2f9 100%);
+  color: #10233c;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
 .container {
-  max-width: 1000px;
+  max-width: 1100px;
+  width: 100%;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 2rem 1.5rem 2.5rem;
 }
 
 .top-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem;
-  background: #0f172a;
-  color: #f8fafc;
+  padding: 1rem 1.5rem;
+  background: rgba(11, 32, 58, 0.95);
+  color: #f8fbff;
+  box-shadow: 0 14px 32px rgba(11, 32, 58, 0.25);
 }
 
-.top-bar h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.75rem;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
 }
 
-.top-bar p {
+.brand h1 {
   margin: 0;
-  color: #cbd5f5;
+  font-size: 1.45rem;
+}
+
+.brand p {
+  margin: 0.2rem 0 0;
+  color: #b7c9e6;
+  font-size: 0.9rem;
+}
+
+.brand-mark {
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 0.65rem;
+  display: grid;
+  place-content: center;
+  font-weight: 700;
+  background: linear-gradient(145deg, #4f8ef7, #1f5fc8);
 }
 
 .menu {
   display: flex;
-  gap: 1rem;
-  padding: 0.75rem 1.5rem;
+  gap: 0.8rem;
+  padding: 0.8rem 1.5rem;
   background: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid #d8e0ec;
 }
 
 .menu a {
   text-decoration: none;
-  color: #1e293b;
+  color: #1d3557;
   font-weight: 600;
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
 }
 
 .menu a.router-link-active {
-  color: #2563eb;
+  background: #e7f0ff;
+  color: #1f5fc8;
 }
 
 .auth-actions {
@@ -109,149 +125,108 @@ body {
   gap: 0.75rem;
 }
 
-.card {
-  background: #ffffff;
-  padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-  margin-bottom: 1.5rem;
+:global(.card) {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 12px 28px rgba(15, 39, 68, 0.08);
+  border: 1px solid #deE7f2;
+  padding: 1.4rem;
+  margin-bottom: 1.1rem;
 }
 
-.field {
+:global(.field) {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   margin-bottom: 1rem;
 }
 
-.grid {
+:global(.grid) {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-.checkbox {
-  align-items: center;
-}
-
-input,
-select {
-  border: 1px solid #d7dde5;
-  border-radius: 8px;
-  padding: 0.6rem 0.75rem;
-  font-size: 1rem;
-}
-
-.actions {
+:global(.actions) {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.65rem;
   flex-wrap: wrap;
 }
 
-button {
+:global(input),
+:global(select) {
+  border: 1px solid #c7d5e6;
+  border-radius: 10px;
+  padding: 0.64rem 0.75rem;
+  font-size: 0.95rem;
+  color: #10233c;
+  background: #fbfdff;
+}
+
+:global(button) {
   border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 8px;
-  background: #2563eb;
+  padding: 0.6rem 0.95rem;
+  border-radius: 10px;
+  background: linear-gradient(150deg, #2669de, #1d54b1);
   color: #ffffff;
   font-weight: 600;
   cursor: pointer;
 }
 
-button.secondary {
-  background: #e2e8f0;
-  color: #1f2937;
+:global(button.secondary) {
+  background: #e6edf7;
+  color: #1b365d;
 }
 
-button.danger {
-  background: #dc2626;
+:global(button.danger) {
+  background: linear-gradient(150deg, #d94242, #bb2b2b);
 }
 
-table {
+:global(table) {
   width: 100%;
   border-collapse: collapse;
 }
 
-th,
-td {
+:global(th),
+:global(td) {
   text-align: left;
   padding: 0.75rem 0.5rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e0e7f1;
 }
 
-.status {
-  color: #64748b;
+:global(.status) {
+  color: #5a6f8d;
 }
 
-.status.error {
-  color: #dc2626;
+:global(.status.error) {
+  color: #c62828;
 }
 
-.pill {
+:global(.pill) {
   display: inline-flex;
   align-items: center;
-  padding: 0.15rem 0.6rem;
+  padding: 0.2rem 0.65rem;
   border-radius: 999px;
-  font-size: 0.85rem;
+  font-size: 0.83rem;
   font-weight: 600;
 }
 
-.pill-success {
-  background: #dcfce7;
-  color: #166534;
+:global(.pill-success) {
+  background: #ddf8e8;
+  color: #17673a;
 }
 
-.pill-warning {
-  background: #fef3c7;
-  color: #92400e;
+:global(.pill-warning) {
+  background: #fff0ca;
+  color: #8a5a12;
 }
 
-.pill-neutral {
-  background: #e2e8f0;
-  color: #1f2937;
+:global(.pill-neutral) {
+  background: #e7edf6;
+  color: #264870;
 }
 
-.auth-card {
-  max-width: 420px;
-  margin: 2rem auto;
-}
-
-.muted {
-  color: #64748b;
-  margin-bottom: 1rem;
-}
-
-.search-form {
-  display: flex;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.search-results {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 0.75rem;
-}
-
-.search-results li {
-  background: #f8fafc;
-  padding: 0.75rem;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-}
-
-.profile-grid {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-}
-
-.label {
-  color: #94a3b8;
-  font-size: 0.85rem;
-  margin: 0 0 0.25rem;
+:global(.muted) {
+  color: #5d7393;
 }
 </style>

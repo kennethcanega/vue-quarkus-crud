@@ -75,6 +75,8 @@ Equivalent concept in other frameworks: bootstrapping app root + plugin/middlewa
 
 `App.vue` is the shell: header, auth actions, nav, and content area.
 
+Recent update: the shell styling was refreshed to a more professional visual design while preserving original navigation behavior.
+
 ### Vue features used
 
 - `v-if` to show nav/actions only when authenticated.
@@ -130,8 +132,16 @@ Request interceptor:
 ### Auth functions
 
 - `login(username, password)`
-- `logout()`
+- `logout()` (calls backend `/auth/logout` then clears client state)
 - `loadProfile()`
+- `initializeAuth()` (startup refresh/profile bootstrap)
+
+### Refresh behavior (new)
+
+- Access token refresh interval is configurable via `VITE_AUTH_REFRESH_INTERVAL_MS` (default `5000`).
+- Scheduler calls `POST /auth/refresh` repeatedly while authenticated.
+- Axios response interceptor retries once on `401` by refreshing token first.
+- Refresh requests are de-duplicated with an in-flight promise guard.
 
 ### Derived booleans
 
@@ -184,18 +194,34 @@ All views use `<script setup>` (Composition API style).
 
 ---
 
-## 9) End-to-end login flow
+## 9) End-to-end login + refresh + logout flow
 
 1. User submits login form.
 2. `login()` posts to `/auth/login`.
-3. Token + user are saved in reactive state and localStorage.
-4. Router redirects to `/profile`.
-5. Future API calls include Bearer token via interceptor.
-6. Guards and menus react to `isAuthenticated`/`isAdmin`.
+3. Access token + user are saved in reactive state and localStorage.
+4. Backend also sets HTTP-only refresh cookie.
+5. Router redirects to `/profile`.
+6. Future API calls include Bearer token via interceptor.
+7. Scheduler and 401 interceptor call `/auth/refresh` to keep access token current.
+8. `logout()` posts `/auth/logout`, then clears state + scheduler and routes to `/login`.
 
 ---
 
-## 10) How to become proficient faster
+## 10) Frontend environment variables
+
+- `VITE_API_BASE_URL` (default `http://localhost:8080`)
+- `VITE_AUTH_REFRESH_INTERVAL_MS` (default `5000`)
+
+Example:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8080
+VITE_AUTH_REFRESH_INTERVAL_MS=5000
+```
+
+---
+
+## 11) How to become proficient faster
 
 Practical exercises:
 

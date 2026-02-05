@@ -1,6 +1,7 @@
 <template>
   <section class="card">
-    <h2>User Search</h2>
+    <h2>User Directory Search</h2>
+    <p class="muted">Locate teammates quickly by name or email.</p>
     <form class="search-form" @submit.prevent="handleSearch">
       <input v-model="query" placeholder="Search by name or email" />
       <button type="submit">Search</button>
@@ -36,3 +37,28 @@ const handleSearch = async () => {
   }
 };
 </script>
+
+<style scoped>
+.search-form {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.search-results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.search-results li {
+  background: #f8fbff;
+  border: 1px solid #dbe5f2;
+  padding: 0.75rem;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+}
+</style>
