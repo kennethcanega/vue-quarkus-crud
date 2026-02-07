@@ -1,0 +1,411 @@
+package com.example.users;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.logging.Logger;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@ApplicationScoped
+public class KeycloakAdminService {
+
+    private static final Logger LOGGER = Logger.getLogger(KeycloakAdminService.class.getName());
+
+    @ConfigProperty(name = "keycloak.server-url")
+    String keycloakServerUrl;
+
+    @ConfigProperty(name = "keycloak.realm")
+    String keycloakRealm;
+
+    @ConfigProperty(name = "keycloak.client-id")
+    String keycloakClientId;
+
+    @ConfigProperty(name = "keycloak.client-secret")
+    String keycloakClientSecret;
+
+    @Inject
+    ObjectMapper objectMapper;
+
+    private final HttpClient httpClient = HttpClient.newHttpClient();
+
+    public record CreateUserCommand(String username, String email, String firstName, String password, String role, Boolean active) {
+    }
+
+    public record UpdateUserCommand(String username, String email, String firstName, String password, String role, Boolean active) {
+    }
+
+    public String createUser(CreateUserCommand command) {
+        String adminToken = getServiceAccountToken();
+        if (adminToken == null) {
+            return null;
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("username", command.username());
+        payload.put("email", command.email());
+        payload.put("firstName", command.firstName());
+        payload.put("enabled", Optional.ofNullable(command.active()).orElse(true));
+        payload.put("emailVerified", true);
+        payload.put("requiredActions", List.of());
+        payload.put("credentials", List.of(Map.of(
+                "type", "password",
+                "value", command.password(),
+                "temporary", false)));
+
+        HttpResponse<String> response = sendJson("POST", adminUsersEndpoint(), adminToken, payload);
+        if (response == null) {
+            logFailure("createUser", response);
+            return null;
+        }
+
+        String userId;
+        if (response.statusCode() == 201 || response.statusCode() == 204) {
+            userId = extractCreatedUserId(response);
+            if (userId == null) {
+                userId = findUserIdByUsernameWithRetry(command.username(), adminToken);
+            }
+        } else if (response.statusCode() == 409) {
+            userId = findUserIdByUsernameWithRetry(command.username(), adminToken);
+        } else {
+            logFailure("createUser", response);
+            return null;
+        }
+        if (userId == null) {
+            LOGGER.warning("Keycloak createUser could not resolve userId for username=" + command.username()
+                    + ", createResponse=" + summarizeResponse(response));
+            return null;
+        }
+
+        if (!clearRequiredActions(userId, adminToken)) {
+            LOGGER.warning("Keycloak user created but required-actions cleanup failed for username=" + command.username());
+        }
+
+        if (!assignRealmRole(userId, command.role(), adminToken)) {
+            LOGGER.warning("Keycloak user created but role assignment failed for username=" + command.username());
+        }
+        return userId;
+    }
+
+    public boolean updateUser(String keycloakUserId, UpdateUserCommand command) {
+        String adminToken = getServiceAccountToken();
+        if (adminToken == null || isBlank(keycloakUserId)) {
+            return false;
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("username", command.username());
+        payload.put("email", command.email());
+        payload.put("firstName", command.firstName());
+        payload.put("enabled", Optional.ofNullable(command.active()).orElse(true));
+        payload.put("emailVerified", true);
+        payload.put("requiredActions", List.of());
+
+        HttpResponse<String> response = sendJson("PUT", adminUsersEndpoint() + "/" + keycloakUserId, adminToken, payload);
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("updateUser", response);
+            return false;
+        }
+
+        if (!isBlank(command.password()) && !setPassword(keycloakUserId, command.password(), adminToken)) {
+            LOGGER.warning("Keycloak reset-password failed for userId=" + keycloakUserId);
+            return false;
+        }
+
+        if (!clearRequiredActions(keycloakUserId, adminToken)) {
+            LOGGER.warning("Keycloak required-actions cleanup failed for userId=" + keycloakUserId);
+        }
+
+        if (!assignRealmRole(keycloakUserId, command.role(), adminToken)) {
+            LOGGER.warning("Keycloak user updated but role assignment failed for userId=" + keycloakUserId);
+        }
+        return true;
+    }
+
+    public boolean deleteUser(String keycloakUserId) {
+        String adminToken = getServiceAccountToken();
+        if (adminToken == null || isBlank(keycloakUserId)) {
+            return false;
+        }
+        HttpResponse<String> response = sendJson("DELETE", adminUsersEndpoint() + "/" + keycloakUserId, adminToken, null);
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("deleteUser", response);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean clearRequiredActions(String userId, String adminToken) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("requiredActions", List.of());
+        payload.put("emailVerified", true);
+
+        HttpResponse<String> response = sendJson("PUT", adminUsersEndpoint() + "/" + userId, adminToken, payload);
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("clearRequiredActions", response);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean setPassword(String userId, String password, String adminToken) {
+        Map<String, Object> payload = Map.of(
+                "type", "password",
+                "value", password,
+                "temporary", false);
+        HttpResponse<String> response = sendJson("PUT", adminUsersEndpoint() + "/" + userId + "/reset-password", adminToken, payload);
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("resetPassword", response);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean assignRealmRole(String userId, String roleName, String adminToken) {
+        String finalRole = isBlank(roleName) ? "user" : roleName.trim().toLowerCase();
+
+        JsonNode adminRole = getRole(finalRole, adminToken);
+        JsonNode userRole = getRole("user", adminToken);
+        JsonNode existing = getUserRealmRoles(userId, adminToken);
+        if (adminRole == null || userRole == null || existing == null) {
+            LOGGER.warning("Keycloak role mapping prerequisites missing for userId=" + userId + ", role=" + finalRole);
+            return false;
+        }
+
+        // remove existing managed roles
+        List<JsonNode> toRemove = existing.findValuesAsText("name").stream()
+                .filter(name -> "admin".equals(name) || "user".equals(name))
+                .map(name -> "admin".equals(name) ? adminRole : userRole)
+                .toList();
+
+        if (!toRemove.isEmpty()) {
+            HttpResponse<String> removeResponse = sendJson(
+                    "DELETE",
+                    adminUsersEndpoint() + "/" + userId + "/role-mappings/realm",
+                    adminToken,
+                    toRemove);
+            if (removeResponse == null || removeResponse.statusCode() >= 300) {
+                logFailure("removeRealmRoles", removeResponse);
+                return false;
+            }
+        }
+
+        JsonNode targetRole = "admin".equals(finalRole) ? adminRole : userRole;
+        HttpResponse<String> addResponse = sendJson(
+                "POST",
+                adminUsersEndpoint() + "/" + userId + "/role-mappings/realm",
+                adminToken,
+                List.of(targetRole));
+        if (addResponse == null || addResponse.statusCode() >= 300) {
+            logFailure("addRealmRole", addResponse);
+            return false;
+        }
+        return true;
+    }
+
+    private JsonNode getRole(String roleName, String adminToken) {
+        HttpResponse<String> response = sendJson("GET", adminRolesEndpoint() + "/" + roleName, adminToken, null);
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("getRole:" + roleName, response);
+            return null;
+        }
+        try {
+            return objectMapper.readTree(response.body());
+        } catch (IOException exception) {
+            return null;
+        }
+    }
+
+    private JsonNode getUserRealmRoles(String userId, String adminToken) {
+        HttpResponse<String> response = sendJson("GET", adminUsersEndpoint() + "/" + userId + "/role-mappings/realm", adminToken, null);
+        if (response == null || response.statusCode() >= 300) {
+            logFailure("getUserRealmRoles", response);
+            return null;
+        }
+        try {
+            return objectMapper.readTree(response.body());
+        } catch (IOException exception) {
+            return null;
+        }
+    }
+
+    private String findUserIdByUsernameWithRetry(String username, String adminToken) {
+        final int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            String userId = findUserIdByUsername(username, adminToken);
+            if (!isBlank(userId)) {
+                return userId;
+            }
+            if (attempt < maxAttempts) {
+                try {
+                    Thread.sleep(Duration.ofMillis(250));
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String findUserIdByUsername(String username, String adminToken) {
+        HttpResponse<String> exactResponse = sendJson(
+                "GET",
+                adminUsersEndpoint() + "?username=" + encode(username) + "&exact=true",
+                adminToken,
+                null);
+        if (exactResponse == null || exactResponse.statusCode() >= 300) {
+            logFailure("findUserIdByUsername(exact)", exactResponse);
+            return null;
+        }
+        try {
+            JsonNode exactUsers = objectMapper.readTree(exactResponse.body());
+            if (exactUsers.isArray() && !exactUsers.isEmpty()) {
+                return exactUsers.get(0).path("id").asText(null);
+            }
+        } catch (IOException exception) {
+            return null;
+        }
+
+        HttpResponse<String> fuzzyResponse = sendJson(
+                "GET",
+                adminUsersEndpoint() + "?username=" + encode(username),
+                adminToken,
+                null);
+        if (fuzzyResponse == null || fuzzyResponse.statusCode() >= 300) {
+            logFailure("findUserIdByUsername(fuzzy)", fuzzyResponse);
+            return null;
+        }
+
+        try {
+            JsonNode users = objectMapper.readTree(fuzzyResponse.body());
+            if (!users.isArray() || users.isEmpty()) {
+                return null;
+            }
+            for (JsonNode user : users) {
+                String candidate = user.path("username").asText("");
+                if (username.equalsIgnoreCase(candidate)) {
+                    return user.path("id").asText(null);
+                }
+            }
+            return users.get(0).path("id").asText(null);
+        } catch (IOException exception) {
+            return null;
+        }
+    }
+
+    private String extractCreatedUserId(HttpResponse<String> response) {
+        return response.headers()
+                .firstValue("Location")
+                .map(location -> location.substring(location.lastIndexOf('/') + 1))
+                .orElse(null);
+    }
+
+    private String getServiceAccountToken() {
+        Map<String, String> form = new LinkedHashMap<>();
+        form.put("grant_type", "client_credentials");
+        form.put("client_id", keycloakClientId);
+        form.put("client_secret", keycloakClientSecret);
+
+        HttpResponse<String> response = postToTokenEndpoint(form);
+        if (response == null || response.statusCode() != 200) {
+            logFailure("getServiceAccountToken", response);
+            return null;
+        }
+
+        try {
+            return objectMapper.readTree(response.body()).path("access_token").asText(null);
+        } catch (IOException exception) {
+            return null;
+        }
+    }
+
+    private HttpResponse<String> postToTokenEndpoint(Map<String, String> form) {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(keycloakServerUrl + "/realms/" + keycloakRealm + "/protocol/openid-connect/token"))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(toFormEncodedBody(form)))
+                .build();
+        return sendRequest(request);
+    }
+
+    private HttpResponse<String> sendJson(String method, String endpoint, String bearerToken, Object payload) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .header("Authorization", "Bearer " + bearerToken);
+
+        if (payload != null) {
+            try {
+                builder.header("Content-Type", "application/json")
+                        .method(method, HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)));
+            } catch (IOException exception) {
+                return null;
+            }
+        } else {
+            builder.method(method, HttpRequest.BodyPublishers.noBody());
+        }
+
+        return sendRequest(builder.build());
+    }
+
+    private HttpResponse<String> sendRequest(HttpRequest request) {
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException | InterruptedException exception) {
+            if (exception instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        }
+    }
+
+    private String adminUsersEndpoint() {
+        return keycloakServerUrl + "/admin/realms/" + keycloakRealm + "/users";
+    }
+
+    private String adminRolesEndpoint() {
+        return keycloakServerUrl + "/admin/realms/" + keycloakRealm + "/roles";
+    }
+
+    private String toFormEncodedBody(Map<String, String> form) {
+        return form.entrySet().stream()
+                .map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue()))
+                .reduce((left, right) -> left + "&" + right)
+                .orElse("");
+    }
+
+    private String encode(String value) {
+        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
+    }
+
+    private String summarizeResponse(HttpResponse<String> response) {
+        if (response == null) {
+            return "response=null";
+        }
+        String body = Optional.ofNullable(response.body()).orElse("").trim();
+        if (body.length() > 400) {
+            body = body.substring(0, 400) + "...";
+        }
+        return "status=" + response.statusCode() + ", body=" + body;
+    }
+
+    private void logFailure(String operation, HttpResponse<String> response) {
+        LOGGER.warning("Keycloak operation failed [" + operation + "]: " + summarizeResponse(response));
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+}

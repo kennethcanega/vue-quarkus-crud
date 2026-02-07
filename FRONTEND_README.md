@@ -23,7 +23,7 @@ This project’s frontend dependencies are defined in `frontend/package.json`.
 
 - Vue handles UI state and rendering.
 - Router handles screen transitions without page reload.
-- Axios handles API requests with interceptors (auth headers).
+- Axios handles API requests with interceptors (auth headers) while backend brokers Keycloak token exchanges.
 - Vite keeps development/build fast.
 
 ---
@@ -132,14 +132,16 @@ Request interceptor:
 ### Auth functions
 
 - `login(username, password)`
-- `logout()` (calls backend `/auth/logout` then clears client state)
+  - posts to backend `/auth/login`; backend exchanges credentials with Keycloak and returns app session payload.
+- `logout()`
+  - posts to backend `/auth/logout`; backend invalidates Keycloak refresh token and client clears local state.
 - `loadProfile()`
 - `initializeAuth()` (startup refresh/profile bootstrap)
 
-### Refresh behavior (new)
+### Refresh behavior
 
 - Access token refresh interval is configurable via `VITE_AUTH_REFRESH_INTERVAL_MS` (default `5000`).
-- Scheduler calls `POST /auth/refresh` repeatedly while authenticated.
+- Scheduler calls backend `POST /auth/refresh`; backend exchanges refresh token with Keycloak and rotates cookie.
 - Axios response interceptor retries once on `401` by refreshing token first.
 - Refresh requests are de-duplicated with an in-flight promise guard.
 
@@ -177,6 +179,7 @@ All views use `<script setup>` (Composition API style).
 ### `ManageUsersView.vue` (admin)
 
 - Handles list, create, edit, block/reactivate, delete.
+- Create/edit/delete actions are synced by backend to Keycloak, so newly created users can sign in through the same login page.
 - Single form supports create/edit based on `editingId`.
 - Refreshes list after mutations.
 
@@ -197,13 +200,13 @@ All views use `<script setup>` (Composition API style).
 ## 9) End-to-end login + refresh + logout flow
 
 1. User submits login form.
-2. `login()` posts to `/auth/login`.
-3. Access token + user are saved in reactive state and localStorage.
-4. Backend also sets HTTP-only refresh cookie.
+2. `login()` posts to backend `/auth/login`.
+3. Backend validates credentials against Keycloak and returns access token + local user details.
+4. Frontend stores access token in localStorage; backend sets HTTP-only refresh cookie.
 5. Router redirects to `/profile`.
 6. Future API calls include Bearer token via interceptor.
-7. Scheduler and 401 interceptor call `/auth/refresh` to keep access token current.
-8. `logout()` posts `/auth/logout`, then clears state + scheduler and routes to `/login`.
+7. Scheduler and 401 interceptor call `/auth/refresh`; backend refreshes token through Keycloak.
+8. `logout()` posts `/auth/logout`; backend revokes Keycloak session and frontend clears local state.
 
 ---
 

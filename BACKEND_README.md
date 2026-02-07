@@ -1,349 +1,358 @@
-# Backend Guide (Quarkus + PostgreSQL + JWT) for Developers New to Quarkus
+# Backend Guide (Quarkus + PostgreSQL + Keycloak OIDC)
 
-This guide is written for engineers who are already comfortable with backend development (for example in Spring Boot, .NET, Express, etc.) but are new to Quarkus.
-
-The goal is to explain this backend **file by file**, including runtime/deployment configuration (`docker-compose.yml`, `application.properties`), cryptographic key setup with OpenSSL, and exact authentication/authorization flow.
+This guide explains the backend for developers new to Quarkus, with emphasis on **how Keycloak replaces local JWT signing** and why each step/configuration exists.
 
 ---
 
 ## 1) Libraries used (`backend/pom.xml`) and why
 
-Quarkus uses extensions (dependencies) to add capabilities. In this project:
-
-- **`quarkus-resteasy-reactive-jackson`**
-  - Exposes REST endpoints using JAX-RS annotations (`@Path`, `@GET`, `@POST`, etc.).
-  - Converts Java objects/records to JSON and back (Jackson).
-
+- **`quarkus-rest-jackson`**
+  - REST APIs + JSON serialization/deserialization.
 - **`quarkus-hibernate-orm-panache`**
-  - ORM layer for database entities.
-  - Panache adds active-record style helpers (`User.findById`, `User.listAll`, `user.persist`).
-
+  - ORM + active-record style persistence for entities.
 - **`quarkus-jdbc-postgresql`**
-  - PostgreSQL JDBC integration so Hibernate can connect to Postgres.
-
+  - PostgreSQL driver integration.
 - **`quarkus-arc`**
-  - CDI dependency injection container.
-  - Enables `@ApplicationScoped` and constructor injection patterns.
+  - CDI dependency injection support.
+- **`quarkus-oidc`**
+  - Validates Keycloak-issued access tokens and maps claims/roles to Quarkus security identity.
 
-- **`quarkus-smallrye-jwt`**
-  - Verifies incoming JWT tokens and integrates with Quarkus security identity.
+### Why this changed
 
-- **`quarkus-smallrye-jwt-build`**
-  - Builds/signs JWT tokens in application code (`Jwt.issuer(...).sign()`).
+Previously, the backend generated and signed JWTs itself.
+Now Keycloak issues tokens, and Quarkus focuses on:
 
-- **`quarkus-elytron-security-common`**
-  - Password hash utilities (bcrypt through `BcryptUtil`).
-
-### If you come from Spring Boot
-
-- `@RestController` ≈ `@Path` JAX-RS resource class.
-- Spring Security role checks ≈ `@RolesAllowed`.
-- Spring Data repository calls ≈ Panache entity static methods.
-- `@Service`/`@Component` DI ≈ CDI beans like `@ApplicationScoped`.
+1. brokering auth/refresh/logout flows,
+2. validating incoming Bearer tokens,
+3. enforcing permissions using local user profile role/state (`admin`/`user`, `active`) after token authentication.
 
 ---
 
-## 2) Runtime/deployment file: `docker-compose.yml`
+## 2) Application config (`backend/src/main/resources/application.properties`)
 
-This file spins up local infrastructure and backend service.
+### Database and CORS
 
-## `postgres` service
+Unchanged core behavior:
 
-- Uses image `postgres:16`.
-- Creates DB/user/password via env vars:
-  - `POSTGRES_DB=userdb`
-  - `POSTGRES_USER=postgres`
-  - `POSTGRES_PASSWORD=postgres`
-- Maps host port `5433` → container `5432`.
-  - So local apps connect to `localhost:5433`.
-- Uses volume `postgres_data` to persist data across container restarts.
+- PostgreSQL on `localhost:5433` for local runtime
+- Hibernate schema update for dev convenience
+- CORS enabled for Vue origin and credentialed requests
 
-## `backend` service
+### OIDC + Keycloak config
 
-- Builds from `./backend` using `src/main/docker/Dockerfile.jvm`.
-- Exposes backend API on host `8080`.
-- Passes datasource env vars:
-  - `QUARKUS_DATASOURCE_JDBC_URL=jdbc:postgresql://postgres:5432/userdb`
-  - `QUARKUS_DATASOURCE_USERNAME=postgres`
-  - `QUARKUS_DATASOURCE_PASSWORD=postgres`
-- `depends_on: postgres` ensures DB container starts first.
+Key properties:
 
-### Why this matters
+- `quarkus.oidc.auth-server-url=${KEYCLOAK_SERVER_URL}/realms/${KEYCLOAK_REALM}`
+- `quarkus.oidc.client-id=${KEYCLOAK_CLIENT_ID}`
+- `quarkus.oidc.credentials.secret=${KEYCLOAK_CLIENT_SECRET}`
+- `quarkus.oidc.roles.role-claim-path=realm_access/roles`
 
-- Local host execution (`mvn quarkus:dev`) typically uses `application.properties` URL (`localhost:5433`).
-- Containerized backend uses internal Docker network URL (`postgres:5432`) via env override.
-- Same code, different runtime binding strategy.
+Purpose of each:
 
----
+- **auth-server-url**: tells Quarkus where token metadata and key material come from.
+- **client-id/client-secret**: allows backend to securely call token/logout endpoints.
+- **role-claim-path**: keeps token role claims available when needed for integrations and diagnostics.
 
-## 3) Application config file: `backend/src/main/resources/application.properties`
+Additional backend auth broker properties:
 
-This file defines default backend runtime behavior.
+- `keycloak.server-url`
+- `keycloak.realm`
+- `keycloak.client-id`
+- `keycloak.client-secret`
 
-## Database/ORM
-
-- `quarkus.datasource.db-kind=postgresql`
-- `quarkus.datasource.username=postgres`
-- `quarkus.datasource.password=postgres`
-- `quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5433/userdb`
-- `quarkus.hibernate-orm.database.generation=update`
-- `quarkus.hibernate-orm.log.sql=true`
-
-Interpretation:
-
-- Connect to Postgres on local machine port `5433`.
-- Auto-update schema to match entities (good for local dev, usually stricter in prod).
-- SQL logging enabled for easier debugging.
-
-## CORS
-
-- `quarkus.http.cors=true`
-- `quarkus.http.cors.origins=${CORS_ORIGINS:http://localhost:5173}`
-- `quarkus.http.cors.headers=...`
-- `quarkus.http.cors.methods=...`
-- `quarkus.http.cors.access-control-allow-credentials=true`
-
-This allows browser frontend calls from different origins during development and supports credentialed refresh-cookie flows.
-
-## JWT/security config
-
-- `mp.jwt.verify.issuer=quarkus-crud`
-- `smallrye.jwt.sign.key.location=jwt/privateKey.pem`
-- `mp.jwt.verify.publickey.location=jwt/publicKey.pem`
-- `smallrye.jwt.new-token.signature-algorithm=RS256`
-- `mp.jwt.verify.publickey.algorithm=RS256`
-
-Meaning:
-
-- Tokens created by this service set issuer `quarkus-crud`.
-- Private key signs tokens; public key verifies tokens.
-- RS256 is explicitly configured for both creation and verification.
+These are used by `AuthResource` for direct token/logout HTTP calls.
 
 ---
 
-## 4) Backend codebase walkthrough (per crucial file)
+## 3) Keycloak implementation steps (detailed + purpose)
 
-## `backend/src/main/java/com/example/users/User.java`
+> Admin console URL (local): `http://localhost:8180/admin`
 
-The core entity (`users` table). Extends `PanacheEntity`, so it inherits `id` and ORM helpers.
+### Step 1: Start stack
 
-Fields:
-
-- `name`, `email` for profile data.
-- `username`, `passwordHash`, `role`, `active` for auth/authorization.
-- `@JsonIgnore` on `passwordHash` prevents accidental exposure in API responses.
-
-Includes helper:
-
-- `findByUsername(String username)` for login/profile lookups.
-
-## `backend/src/main/java/com/example/users/PasswordUtils.java`
-
-Security helper wrapping bcrypt:
-
-- `hash(plainPassword)` for storage.
-- `matches(plainPassword, storedHash)` for verification.
-
-Never compare plain passwords directly.
-
-## `backend/src/main/java/com/example/users/AuthResource.java`
-
-Authentication endpoint class (`/auth`).
-
-- `POST /auth/login` marked `@PermitAll`.
-- Validates request payload and credentials.
-- Rejects inactive users.
-- Creates access JWT with:
-  - issuer
-  - subject = username
-  - groups = user role
-  - expiration from `auth.access-token.ttl-seconds` (default 300s).
-- Returns `LoginResponse(token, UserResponse)` and sets HTTP-only refresh cookie.
-- `POST /auth/refresh` rotates refresh token and returns fresh access JWT.
-- `POST /auth/logout` revokes refresh token(s) and expires refresh cookie.
-
-
-## `backend/src/main/java/com/example/users/RefreshToken.java`
-
-Refresh token persistence entity (`refresh_tokens` table).
-
-Fields include:
-
-- `user` relation
-- `tokenHash` (SHA-256 hash of refresh token value)
-- `expiresAt`, `createdAt`, `revokedAt`
-
-Rationale:
-
-- Plain refresh tokens are never stored directly in DB.
-- Revocation and expiration checks are server-side and stateful.
-
-## `backend/src/main/java/com/example/users/RefreshTokenService.java`
-
-Refresh token orchestration service.
-
-Capabilities:
-
-- issue new refresh token on login
-- validate refresh token
-- rotate refresh token on `/auth/refresh`
-- revoke one/all active refresh tokens (logout/login)
-
-This enables industry-standard session handling with short-lived access tokens and revocable long-lived refresh tokens.
-
-## `backend/src/main/java/com/example/users/UserResource.java`
-
-Main protected business API class (`/users`).
-
-Endpoints:
-
-- `GET /users` (`@RolesAllowed("admin")`) list all users.
-- `GET /users/search` (`@RolesAllowed({"admin","user"})`) search by name/email.
-- `GET /users/me` (`@RolesAllowed({"admin","user"})`) current profile from token principal.
-- `POST /users` (`@RolesAllowed("admin")`, `@Transactional`) create user.
-- `PUT /users/{id}` (`@RolesAllowed("admin")`, `@Transactional`) partial update.
-- `DELETE /users/{id}` (`@RolesAllowed("admin")`, `@Transactional`) delete user.
-
-Key detail:
-
-- `SecurityIdentity` gives current authenticated principal (`identity.getPrincipal().getName()`), which maps to JWT subject (username).
-
-## DTO/record files under `com/example/users`
-
-- `LoginRequest`, `LoginResponse`
-- `CreateUserRequest`, `UpdateUserRequest`
-- `UserResponse`, `UserSummary`
-
-Why records/DTOs matter:
-
-- Keep API contract explicit.
-- Avoid leaking internal entity fields.
-- Enable endpoint-specific response shape (`UserSummary` for lightweight search).
-
-## `backend/src/main/java/com/example/users/UserSeeder.java`
-
-Startup initialization bean:
-
-- Observes `StartupEvent`.
-- Ensures `admin/admin` exists and is active with admin role.
-- Backfills old users with missing username/role/active/password defaults.
-- Runs in transaction so updates persist atomically.
-
-This prevents local environments from starting in an unusable auth state.
-
----
-
-## 5) OpenSSL key generation: commands and rationale
-
-This backend signs JWTs with RSA key material (asymmetric crypto).
-
-Commands:
+**Purpose:** Bring up Postgres + Keycloak + backend together.
 
 ```bash
-# 1) Generate RSA private key (2048 bits)
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out privateKey.pem
-
-# 2) Derive matching public key
-openssl pkey -in privateKey.pem -pubout -out publicKey.pem
+docker compose up --build
 ```
 
-Why these commands:
+Keycloak needs extra warm-up time. The backend uses `quarkus.oidc.connection-delay` so startup race conditions are tolerated.
 
-- **Private key** is secret and used only by this backend to sign JWTs.
-- **Public key** can be shared and used by verifiers to validate signatures.
-- Asymmetric signing is safer/scalable: verifiers do not need secret signing key.
+### Step 2: Create realm `quarkus-crud`
 
-Where files go in this project:
+**Purpose:** Identity boundary for this app.
 
-- `backend/src/main/resources/jwt/privateKey.pem`
-- `backend/src/main/resources/jwt/publicKey.pem`
+UI path:
+- Realm dropdown (top-left) → **Create realm** → name `quarkus-crud`.
 
-Why not plain strings?
+### Step 3: Create realm roles
 
-- `Jwt.sign()` in this setup expects real key material.
-- Using random plain text as signing key can fail or be insecure.
+**Purpose:** These map directly to backend role guards.
+
+UI path:
+- **Realm roles** → create `admin`
+- **Realm roles** → create `user`
+
+### Step 4: Create client `quarkus-crud-client`
+
+**Purpose:** Backend uses this client for token exchange and admin operations.
+
+UI path:
+- **Clients** → **Create client**
+- Type: OpenID Connect
+- ID: `quarkus-crud-client`
+- Settings (same values shown in your Keycloak create-client screenshots):
+  - Client authentication: enabled
+  - Direct access grants: enabled
+  - Service accounts roles: enabled
+  - Authorization: disabled
+  - Standard flow: optional for this backend flow
+
+- Next screen (**Login settings**): Root URL, Home URL, Valid redirect URIs, post-logout URIs, and Web origins can stay empty for this backend service client.
+
+Then open **Credentials** tab and copy client secret.
+
+
+
+**If you are stuck on the screen you shared:**
+- In your screenshot, the top-left dropdown shows `quarkus-crud-client` as the **realm**. That means you are currently viewing **Realm settings**, not the client details page.
+- To reach the correct page: left menu → **Clients** → click client **`quarkus-crud-client`**.
+- On that client page, open **Settings** (or during create flow, **Capability config**) and ensure **Service accounts roles = ON**. Save.
+- After saving, a **Service account roles** tab becomes available for that client. Open it to assign `realm-management` roles.
+### Step 5: Grant service-account roles
+
+**Purpose:** Required for backend provisioning in Manage Users.
+
+UI path:
+- Client `quarkus-crud-client` → verify **Service accounts roles** is ON, then open **Service account roles** tab
+- Select client `realm-management`
+- Assign:
+  - `manage-users`
+  - `view-users`
+  - `view-realm`
+
+### Step 6: Create admin login user
+
+**Purpose:** first app login account.
+
+UI path:
+- **Users** → **Create new user** (`admin`)
+- **Credentials** tab → set non-temporary password
+- **Role mapping** tab → assign realm role `admin`
+
+### Step 7: Set backend env vars
+
+**Purpose:** Bind backend OIDC and admin-client config to created realm/client.
+
+```bash
+export KEYCLOAK_SERVER_URL="http://localhost:8180"
+export KEYCLOAK_REALM="quarkus-crud"
+export KEYCLOAK_CLIENT_ID="quarkus-crud-client"
+export KEYCLOAK_CLIENT_SECRET="<your-client-secret>"
+export AUTH_REFRESH_COOKIE_SECURE="false"
+```
+
+### Step 8: Production guidance
+
+- Use production Keycloak mode (not `start-dev`) with managed database.
+- Enforce HTTPS end-to-end.
+- Put client secret in secure secret store.
+- Keep service account privileges minimal.
+- Enable stricter password/MFA/lockout policies in realm.
+- Rotate secrets periodically and audit admin events.
+---
+
+## 3.1) User data ownership (important)
+
+- Keycloak stores authentication credentials (passwords).
+- Local `users` table stores only app profile + authorization metadata (`name`, `email`, `username`, `role`, `active`, optional `keycloakUserId`).
+- The backend no longer stores password hashes.
+
+
+
+## 3.2) Troubleshooting `invalid_client_credentials`
+
+Symptom in Keycloak logs:
+
+```
+error="invalid_client_credentials", grant_type="password"
+```
+
+Meaning:
+- Keycloak rejected the **client secret** for `quarkus-crud-client`.
+- User password is not evaluated yet at this stage.
+
+Why:
+- `AuthResource` sends `client_id` + `client_secret` in password-grant token exchange.
+- If backend env secret and Keycloak client secret differ, login always fails.
+
+Fix path:
+1. Keycloak UI → **Clients** → `quarkus-crud-client` → **Credentials** → copy secret.
+2. Set backend env `KEYCLOAK_CLIENT_SECRET` to that exact value.
+3. Restart backend container/process.
+4. Retry login.
+
+Compose note:
+- `docker-compose.yml` uses `KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-change-me}`.
+- Set `KEYCLOAK_CLIENT_SECRET` in shell or `.env` before `docker compose up --build`.
+
+
+
+
+## 3.3) Troubleshooting login success but API 403
+
+Symptom:
+- `/auth/login` succeeds
+- `/users`, `/users/me`, `/users/search` return 403
+
+Meaning:
+- Token is valid, but local user authorization checks failed.
+
+Checks:
+1. Local `users` row exists for token username (`preferred_username`).
+2. Local `active` is true.
+3. Local `role` is `admin` for admin CRUD endpoints.
+
+Reasoning:
+- Keycloak authenticates identity.
+- Backend then authorizes using local profile metadata to keep business access aligned with app-managed roles.
+
+
+
+## 3.4) Troubleshooting create-user 201 but login 401
+
+Symptom:
+- Admin creates user successfully (`POST /users` -> 201).
+- New user login returns 401 from `/auth/login`.
+
+Common cause:
+- Access token claims may not include `preferred_username` depending on client scope mapping.
+- If backend only used username claim, local lookup could fail despite valid Keycloak credentials.
+
+Implemented behavior:
+- Backend resolves local user by `preferred_username` first.
+- If missing/unmatched, backend falls back to `sub` claim and matches local `keycloakUserId`.
+
+Verification steps:
+1. Keycloak user exists and has a non-temporary password.
+2. Local DB row exists with correct `username` and `keycloak_user_id`.
+3. Local `active=true`.
+4. Stored `keycloak_user_id` equals Keycloak user UUID exactly.
+
+
+
+
+## 3.5) Troubleshooting `POST /users` returns 502
+
+Potential causes:
+- Keycloak client credentials are invalid.
+- Service account lacks required admin permissions.
+- Keycloak user already exists from a previous partial run.
+
+Current backend behavior:
+- On Keycloak create `409`, backend resolves existing user id and proceeds with local sync.
+- Role mapping failures are logged but do not fail create/update API responses.
+
+Required service account roles (realm-management):
+- `manage-users`
+- `view-users`
+- `view-realm`
+
+
+When `POST /users` returns 502, check backend logs for `Keycloak operation failed [...]` entries. These include HTTP status and response body from Keycloak admin/token endpoints to speed up diagnosis.
+If you see `createUser could not resolve userId`, the backend created/conflicted user in Keycloak but could not immediately resolve id; it now retries lookup several times before failing.
+
+
+
+
+## 3.6) Troubleshooting `resolve_required_actions` (Account is not fully set up)
+
+Symptom in Keycloak logs:
+
+```
+error="resolve_required_actions", reason="Account is not fully set up"
+```
+
+Meaning:
+- User has pending required actions in Keycloak, so password grant is denied.
+
+Backend change:
+- Create/update provisioning now sets `requiredActions=[]` and `emailVerified=true` for managed users to avoid blocking password-grant login.
+
+Manual recovery for existing users:
+1. Keycloak → Users → target user → clear **Required user actions**.
+2. Ensure password is non-temporary in **Credentials** tab.
+3. Retry `/auth/login`.
+
 
 ---
 
-## 6) Authentication processing (step-by-step)
+## 4) Auth flow in code (`AuthResource`)
 
-When frontend calls `POST /auth/login`:
+`/auth/*` endpoints now broker Keycloak flows:
 
-1. Request body arrives as `LoginRequest`.
-2. Backend validates non-null fields.
-3. `User.findByUsername(...)` fetches user.
-4. `PasswordUtils.matches(...)` checks bcrypt hash.
-5. If user missing/inactive/wrong password → `401 Unauthorized`.
-6. Backend builds access JWT (`iss`, `sub`, `groups`, expiry) and signs with private key.
-7. Backend issues refresh token, stores hash in DB, and sets HTTP-only cookie.
-8. Response returns access token + sanitized user payload.
+- `POST /auth/login`
+  - exchanges username/password against Keycloak token endpoint (`grant_type=password`)
+  - validates that local app user exists and is active (`preferred_username` lookup with `sub`/`keycloakUserId` fallback)
+  - returns access token + app user payload
+  - sets HTTP-only refresh cookie
 
-Frontend stores access token and sends `Authorization: Bearer <token>` on later requests.
+- `POST /auth/refresh`
+  - exchanges cookie refresh token with Keycloak (`grant_type=refresh_token`)
+  - rotates refresh token cookie
+  - returns new access token + app user payload
 
----
+- `POST /auth/logout`
+  - calls Keycloak logout endpoint
+  - clears refresh cookie
 
-## 7) Authorization processing (step-by-step)
+Purpose of keeping `/auth/*` in backend:
 
-For a protected endpoint (example `GET /users`):
-
-1. Incoming Bearer token extracted by Quarkus security.
-2. Signature verified with configured public key.
-3. Issuer and algorithm validated (`application.properties`).
-4. Security identity created (principal + groups).
-5. `@RolesAllowed("admin")` evaluated.
-6. If role missing → access denied before endpoint logic.
-7. If role present → resource method executes.
-
-This means security checks happen before your business code runs.
+- frontend remains simple and never handles Keycloak client secret,
+- local user `active` status can still be enforced,
+- API contract with frontend remains stable.
 
 ---
 
-## 8) Data flow examples in this backend
+## 5) Protected APIs (`UserResource`)
 
-## Login and profile
+Manage-users operations are synchronized to Keycloak via `KeycloakAdminService`:
+- create: creates Keycloak user, sets password, attempts role assignment, then persists local profile
+- update: updates Keycloak profile/enabled state/role/password, attempts role assignment, then updates local row
+- delete: removes Keycloak user then deletes local row
 
-- `/auth/login` returns token and user.
-- `/users/me` reads principal from JWT subject and loads matching user.
 
-## Admin CRUD
+Authorization is profile-based after authentication:
 
-- Create/update/delete endpoints are transactional.
-- Mutations change entity state and ORM flushes to Postgres.
+- `@Authenticated` ensures only valid Keycloak tokens can access `/users/*`.
+- Local `users` table role/state (`admin`/`user`, `active`) determines operation permission.
 
-## Search
+Profile resolution for `/users/me`:
 
-- `/users/search?q=...` performs case-insensitive query against name/email.
-- Returns `UserSummary` list to keep payload focused.
+- reads `preferred_username` claim when present,
+- falls back to principal name,
+- maps that username to local `User` row.
+
+Why this matters:
+
+- Keycloak token subject may be UUID depending on mapper,
+- `preferred_username` keeps profile lookup aligned with app usernames.
 
 ---
 
-## 9) Refresh + logout processing (step-by-step)
+## 6) Important operational notes
 
-When frontend calls `POST /auth/refresh`:
+- The local `users` table is still used for app profile/business data.
+- Keycloak remains the authentication source of truth.
+- Ensure usernames in Keycloak and local DB match for successful `/users/me` and login payload mapping.
+- For production, store `KEYCLOAK_CLIENT_SECRET` in secure secret storage (not plaintext files).
 
-1. Backend reads refresh cookie (`refresh_token`).
-2. Hashes cookie value and finds matching DB record.
-3. Rejects token if missing/revoked/expired/inactive user.
-4. Revokes old token and persists rotated replacement.
-5. Issues fresh access JWT and sets rotated refresh cookie.
+---
 
-When frontend calls `POST /auth/logout`:
+## 7) Quick verification checklist
 
-1. Backend reads refresh cookie.
-2. Revokes associated refresh token(s).
-3. Returns `204` + expired cookie (`maxAge=0`).
-
-## 10) How to quickly understand this codebase as a new Quarkus dev
-
-Recommended order:
-
-1. `docker-compose.yml` (runtime wiring)
-2. `backend/pom.xml` (capabilities/extensions)
-3. `application.properties` (security/db behavior)
-4. `User.java` + DTO records (data model and API contracts)
-5. `AuthResource.java` (login/token creation)
-6. `UserResource.java` (role-protected business APIs)
-7. `RefreshToken.java` + `RefreshTokenService.java` (session lifecycle)
-8. `UserSeeder.java` (startup guarantees)
-
-If you can trace how a JWT created in `AuthResource` becomes a `SecurityIdentity` used by `@RolesAllowed` in `UserResource`, you have mastered the central Quarkus security flow in this project.
+1. Login succeeds with Keycloak user credentials.
+2. `/users/me` returns local profile for that username.
+3. `admin` role token can access `/users`; `user` role token cannot.
+4. `/auth/refresh` rotates refresh cookie and returns fresh access token.
+5. `/auth/logout` clears session cookie.
